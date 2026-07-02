@@ -8,6 +8,11 @@ data/*.json
 !data/*.enc.json
 data-src/
 
+# Senhas e segredos locais NUNCA entram no repo
+*.local.json
+*.local.txt
+tools/senhas*
+
 # Diversos
 node_modules/
 *.log
