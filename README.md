@@ -1,10 +1,22 @@
-# Radar BR Spices — Painel Comercial Web
+# Book de Vendas BR Spices — Painel Comercial Web
 
 Dashboard comercial em HTML/JS para gestão, gerentes e vendedores, com acesso controlado por perfil.
 
 ## Como funciona
 ```
-BASE PROTHEUS (xlsx) → script de exportação → JSONs criptografados por perfil → git push → site atualiza
+BASE PROTHEUS (xlsx) → tools/export_radar.py → JSONs criptografados por perfil → git push → site atualiza
+```
+
+## Login
+A senha digitada gera um hash (SHA-256) que localiza o arquivo do perfil em `data/`,
+e a mesma senha deriva a chave (PBKDF2 310k + AES-GCM) que descriptografa os dados
+**no navegador** (WebCrypto). Nenhuma senha ou dado aberto trafega ou fica em servidor.
+Senhas: `tools/senhas.local.txt` (somente local, nunca commitado).
+
+## Atualizar os dados
+```
+%LOCALAPPDATA%\Programs\Python\Python312\python.exe tools\export_radar.py
+git add data/ && git commit -m "dados" && git push
 ```
 
 - **Perfis:** gestor (tudo) · gerente (sua equipe) · vendedor (sua carteira)
