@@ -326,9 +326,8 @@ def main():
             senhas[chave] = {"senha": gerar_senha(), "perfil": perfil, "nome": nome}
         if extra:
             senhas[chave].update(extra)
-        # login: e-mail p/ visão completa; nome.sobrenome p/ gerentes e vendedores
-        login = (extra or {}).get("email") or gerar_login(nome)
-        login = login.strip().lower()
+        # login: sempre nome.sobrenome (e-mail é só informação de contato, nada é enviado)
+        login = gerar_login(nome)
         senhas[chave]["login"] = login
         payload["escopo"]["login"] = login
         senha = senhas[chave]["senha"]
