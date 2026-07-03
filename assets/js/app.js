@@ -281,34 +281,32 @@ function renderKpis(rows, meses) {
 /* ---------- evolução: sempre os últimos 12 meses ---------- */
 function renderEvolucao(rows) {
   const { ano, mes_atual } = S.data.periodo;
-  const me = S.data.meta_empresa_mensal;
   const itens = [];
   for (let k = 11; k >= 0; k--) {
     const idx = ano * 12 + mes_atual - 1 - k;
     const y = Math.floor(idx / 12), m = (idx % 12) + 1;
-    let fat = 0, ly = 0, meta = 0;
+    let fat = 0, ly = 0;
     for (const c of rows) {
       const a = serie(c, y), b = serie(c, y - 1);
       if (a) fat += a[m - 1] || 0;
       if (b) ly += b[m - 1] || 0;
     }
-    if (y === 2026) meta = (me && !filtrado()) ? (me[m - 1] || 0)
-      : rows.reduce((s, c) => s + (c.meta[m - 1] || 0), 0);
-    itens.push({ label: MESES[m - 1] + (y !== ano ? "/" + String(y).slice(2) : ""), fat, ly, meta, parcial: y === ano && m === mes_atual });
+    itens.push({ label: `${MESES[m - 1]}/${String(y).slice(2)}`, fat, ly,
+                 parcial: y === ano && m === mes_atual });
   }
-  $("evo-titulo").innerHTML = `Últimos 12 meses — Realizado × Ano anterior × Meta <span class="rg">R$</span>`;
+  $("evo-titulo").innerHTML = `Últimos 12 meses — Realizado × Ano anterior <span class="rg">R$</span>`;
   $("evo-chart").innerHTML = svgEvolucao(itens);
   $("evo-leg").innerHTML =
     `<span><i style="background:linear-gradient(180deg,#74AFAE,#2f7d7c)"></i>Realizado</span>` +
     `<span><i style="background:#dde3e5"></i>Mesmo mês do ano anterior</span>` +
-    `<span><i style="background:#C96643"></i>Meta (linha)</span>` +
-    `<span style="margin-left:auto">${MESES[mes_atual - 1]} = parcial</span>`;
+    `<span><i style="background:#2e9e63"></i>▲▼ crescimento vs ano anterior</span>` +
+    `<span style="margin-left:auto">${MESES[mes_atual - 1]}/${String(ano).slice(2)} = parcial</span>`;
 }
 
 function svgEvolucao(itens) {
-  const W = 720, H = 240, base = 196, topo = 34;
+  const W = 720, H = 258, base = 214, topo = 50;
   const n = itens.length, passo = W / n;
-  const max = Math.max(1, ...itens.map((i) => Math.max(i.fat, i.ly, i.meta)));
+  const max = Math.max(1, ...itens.map((i) => Math.max(i.fat, i.ly)));
   const y = (v) => base - (v / max) * (base - topo);
   const wB = Math.min(17, passo * 0.32);
   let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%">`;
@@ -321,26 +319,23 @@ function svgEvolucao(itens) {
   s += '<defs><linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#74AFAE"/><stop offset="1" stop-color="#2f7d7c"/></linearGradient></defs>';
   itens.forEach((it, i) => {
     const cx = passo * i + passo / 2;
-    // ano anterior (clara) colada à esquerda da barra atual
     if (it.ly > 0)
       s += `<rect x="${cx - wB - 1}" y="${y(it.ly)}" width="${wB}" height="${base - y(it.ly)}" rx="2.5" fill="#dde3e5"><title>${esc(it.label)} ano anterior: ${fmtM(it.ly)}</title></rect>`;
     if (it.fat > 0)
       s += `<rect x="${cx + 1}" y="${y(it.fat)}" width="${wB}" height="${base - y(it.fat)}" rx="2.5" fill="url(#gt)"><title>${esc(it.label)}: ${fmtM(it.fat)}</title></rect>`;
-    // valor acima da barra atual
+    /* rótulos empilhados acima do par de barras:
+       crescimento ▲/▼ (topo) → realizado (meio) → ano anterior (base, cinza) */
+    const yTop = y(Math.max(it.fat, it.ly));
+    if (it.ly > 0)
+      s += `<text x="${cx}" y="${yTop - 4}" font-size="8.5" fill="#8a979d" text-anchor="middle">${fmtNum(it.ly)}</text>`;
     if (it.fat > 0)
-      s += `<text x="${cx + 1 + wB / 2}" y="${y(it.fat) - 5}" font-size="9.5" font-weight="700" fill="#182226" text-anchor="middle">${fmtNum(it.fat)}${it.parcial ? "*" : ""}</text>`;
+      s += `<text x="${cx}" y="${yTop - 15}" font-size="9.5" font-weight="700" fill="#182226" text-anchor="middle">${fmtNum(it.fat)}${it.parcial ? "*" : ""}</text>`;
+    if (it.fat > 0 && it.ly > 0 && !it.parcial) {  /* mês parcial não compara (1 dia vs mês cheio) */
+      const g = (it.fat - it.ly) / it.ly;
+      const cor = g >= 0 ? "#2e9e63" : "#cc4b41";
+      s += `<text x="${cx}" y="${yTop - 27}" font-size="9" font-weight="700" fill="${cor}" text-anchor="middle">${g >= 0 ? "▲" : "▼"} ${fmtBR(Math.abs(g) * 100, 0)}%</text>`;
+    }
   });
-  // linha da meta (pula meses sem meta) + valores
-  const pts = itens.map((it, i) => it.meta > 0 ? { x: passo * i + passo / 2, y: y(it.meta), v: it.meta } : null);
-  let seg = []; const segs = [];
-  pts.forEach((p) => { if (p) seg.push(p); else if (seg.length) { segs.push(seg); seg = []; } });
-  if (seg.length) segs.push(seg);
-  for (const sg of segs) {
-    s += `<polyline points="${sg.map((p) => p.x + "," + p.y).join(" ")}" fill="none" stroke="#C96643" stroke-width="2.2" stroke-dasharray="6 5" stroke-linecap="round"/>`;
-    for (const p of sg)
-      s += `<circle cx="${p.x}" cy="${p.y}" r="2.6" fill="#C96643"/>` +
-           `<text x="${p.x}" y="${p.y - 7}" font-size="8.5" fill="#C96643" text-anchor="middle">${fmtNum(p.v)}</text>`;
-  }
   return s + "</svg>";
 }
 
