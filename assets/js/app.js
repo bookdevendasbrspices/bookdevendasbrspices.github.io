@@ -30,6 +30,8 @@ function fmtData(iso) {
   return `${d}/${m}/${a}`;
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+/* nome do vendedor sem o prefixo numérico ("042 - WAGNER TORTELLI" → "WAGNER TORTELLI") */
+const nomeVend = (v) => String(v ?? "").replace(/^\s*\d+\s*-\s*/, "");
 
 /* ---------------- criptografia ---------------- */
 const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -93,23 +95,35 @@ function boot() {
 
   // filtros por perfil
   const gers = [...new Set(d.positivados.map((p) => p.ger))].filter(Boolean).sort();
-  const vends = [...new Set(d.positivados.map((p) => p.vend))].filter(Boolean).sort();
   if (d.escopo.perfil === "gestor") preencherSelect("f-ger", gers);
   else $("f-ger-wrap").style.display = "none";
-  if (d.escopo.perfil !== "vendedor") preencherSelect("f-vend", vends);
-  else $("f-vend-wrap").style.display = "none";
+  if (d.escopo.perfil === "vendedor") $("f-vend-wrap").style.display = "none";
+  else atualizarVendSelect();
 
   renderAll();
 }
 
-function preencherSelect(id, itens) {
+function preencherSelect(id, itens, labelFn) {
   const el = $(id);
-  el.innerHTML = '<option value="">Todos</option>' + itens.map((x) => `<option>${esc(x)}</option>`).join("");
+  el.innerHTML = '<option value="">Todos</option>' +
+    itens.map((x) => `<option value="${esc(x)}">${esc(labelFn ? labelFn(x) : x)}</option>`).join("");
+}
+
+/* o combo de vendedores mostra só quem pertence ao gerente filtrado */
+function atualizarVendSelect() {
+  if ($("f-vend-wrap").style.display === "none") return;
+  const base = S.fGer ? S.data.positivados.filter((p) => p.ger === S.fGer) : S.data.positivados;
+  const vends = [...new Set(base.map((p) => p.vend))].filter(Boolean)
+    .sort((a, b) => nomeVend(a).localeCompare(nomeVend(b), "pt-BR"));
+  preencherSelect("f-vend", vends, nomeVend);
+  $("f-vend").value = vends.includes(S.fVend) ? S.fVend : "";
+  S.fVend = $("f-vend").value;
 }
 
 function onFiltro() {
   S.fGer = $("f-ger-wrap").style.display === "none" ? "" : $("f-ger").value;
   S.fVend = $("f-vend-wrap").style.display === "none" ? "" : $("f-vend").value;
+  atualizarVendSelect();
   S.nPos = 100; S.nCli = 50;
   renderAll();
 }
@@ -160,7 +174,7 @@ function renderAll() {
 function renderChipFiltro() {
   const f = [];
   if (S.fGer) f.push("Gerente: " + S.fGer);
-  if (S.fVend) f.push("Vendedor: " + S.fVend);
+  if (S.fVend) f.push("Vendedor: " + nomeVend(S.fVend));
   $("chip-filtro").textContent = f.length ? f.join(" · ") : "";
   $("chip-filtro").style.display = f.length ? "" : "none";
 }
@@ -323,7 +337,7 @@ function linhaMetaTabela(o) {
   const cls = at == null ? "" : at >= 0.9 ? "" : at >= 0.8 ? "gold" : "red";
   const w = at == null ? 0 : Math.min(100, at * 100);
   const gap = o.meta_ytd ? o.realizado - o.meta_ytd : null;
-  return `<tr><td><b>${esc(o.nome)}</b></td>
+  return `<tr><td><b>${esc(nomeVend(o.nome))}</b></td>
     <td class="r">${fmtM(o.meta_ytd)}</td><td class="r">${fmtM(o.realizado)}</td>
     <td><div class="bar"><i class="${cls}" style="width:${w}%"></i></div></td>
     <td class="r" style="color:${cor}"><b>${pct}</b></td>
@@ -354,7 +368,7 @@ function renderMetas(rows) {
   const gaps = cli.map((p) => ({ ...p, gap: p.fat_ytd - p.meta_ytd })).sort((a, b) => a.gap - b.gap);
   $("metas-gaps").innerHTML = gaps.slice(0, S.nCli).map((p) => {
     const at = p.meta_ytd ? p.fat_ytd / p.meta_ytd : null;
-    return `<tr><td><b>${esc(p.cliente)}</b></td><td>${esc(p.vend)}</td>
+    return `<tr><td><b>${esc(p.cliente)}</b></td><td>${esc(nomeVend(p.vend))}</td>
       <td class="r">${fmtM(p.meta_ytd)}</td><td class="r">${fmtM(p.fat_ytd)}</td>
       <td class="r" style="color:${at >= 1 ? "var(--ok)" : at >= 0.8 ? "var(--warn)" : "var(--bad)"}"><b>${fmtPct(at, 0)}</b></td>
       <td class="r" style="color:${p.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${(p.gap >= 0 ? "+" : "−") + fmtM(Math.abs(p.gap))}</td></tr>`;
@@ -384,7 +398,7 @@ function renderPositivados(rows) {
     const st = ST[p.status] || ST.acionar;
     const stTxt = p.status === "acionar" && p.meses_sem < 99 ? `Acionar agora · ${p.meses_sem} meses` : st.nome;
     return `<tr><td><b>${esc(p.cliente)}</b><span style="display:block;font-size:10.5px;color:var(--soft)">${esc(p.uf)}</span></td>
-      ${mostraVend ? `<td>${esc(p.vend)}</td>` : ""}
+      ${mostraVend ? `<td>${esc(nomeVend(p.vend))}</td>` : ""}
       <td>${fmtData(p.ult_compra)}</td><td>${sparkHtml(p.hist)}</td>
       <td class="r">${fmtM(p.media_mensal)}</td>
       <td class="r">${p.perdido_estim > 0 ? `<b style="color:var(--bad)">${fmtM(p.perdido_estim)}</b>` : '<span style="color:var(--soft)">—</span>'}</td>
@@ -404,7 +418,7 @@ function renderRankings(rows) {
   // vendedores
   if (d.escopo.perfil !== "vendedor") {
     const v = agrupar(rows, "vend").slice(0, 10);
-    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, o.nome, null, fmtM(o.realizado))).join("") || '<li class="empty">—</li>';
+    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, nomeVend(o.nome), null, fmtM(o.realizado))).join("") || '<li class="empty">—</li>';
     $("rk-vend-card").style.display = "";
   } else $("rk-vend-card").style.display = "none";
   // gerentes (só gestor, sem filtro de gerente)
@@ -415,7 +429,7 @@ function renderRankings(rows) {
   } else $("rk-ger-card").style.display = "none";
   // clientes
   const c = [...rows].sort((a, b) => b.fat_ytd - a.fat_ytd).slice(0, 10);
-  $("rk-cli").innerHTML = c.map((p, i) => liRank(i, p.cliente, `${p.vend} · ${p.uf}`, fmtM(p.fat_ytd))).join("");
+  $("rk-cli").innerHTML = c.map((p, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtM(p.fat_ytd))).join("");
   // famílias (escopo total)
   const f = (d.rankings.familias || []).slice(0, 10);
   $("rk-fam").innerHTML = f.map((o, i) => liRank(i, o.nome, null, fmtM(o.fat))).join("");
