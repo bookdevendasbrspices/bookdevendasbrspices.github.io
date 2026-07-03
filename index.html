@@ -62,9 +62,12 @@
       <div class="f" id="f-ger-wrap"><label>Gerente</label><select id="f-ger"></select></div>
       <div class="f" id="f-vend-wrap"><label>Vendedor</label><select id="f-vend"></select></div>
       <button class="reset" id="btn-reset">✕ Limpar filtros</button>
+      <button class="reset exp" id="btn-pdf" title="Gera PDF da visão atual (com os filtros aplicados)">⬇ PDF</button>
+      <button class="reset exp" id="btn-xls" title="Gera Excel da visão atual (com os filtros aplicados)">⬇ Excel</button>
       <div class="chip" id="chip-filtro" style="display:none;background:var(--warn-bg);border-color:#eadcb4;color:#8a6d1d"></div>
       <div class="chip" id="chip-periodo"></div>
     </div>
+    <div id="print-head" style="display:none"></div>
 
     <!-- ========== VISÃO GERAL ========== -->
     <section class="view on" id="v-geral">

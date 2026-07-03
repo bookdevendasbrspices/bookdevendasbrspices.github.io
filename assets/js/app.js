@@ -503,6 +503,192 @@ function renderRankings(rows, meses) {
   $("rk-fam-nota").style.display = (filtrado() || S.per !== "ytd" || S.ano !== 2026) ? "" : "none";
 }
 
+/* ---------------- exportação PDF / Excel ---------------- */
+const viewAtiva = () => document.querySelector(".view.on").id.slice(2);
+const NOMES_VIEW = { geral: "Overview", metas: "Metas vs Realizado", posit: "Positivados", rank: "Rankings" };
+
+function contextoTxt() {
+  const f = [];
+  if (S.fGer) f.push("Gerente: " + S.fGer);
+  if (S.fVend) f.push("Vendedor: " + nomeVend(S.fVend));
+  return `${S.ano} · ${rotuloPer()}${f.length ? " · " + f.join(" · ") : ""} · dados até ${fmtData(S.data.atualizado_ate)}`;
+}
+const arquivoNome = (ext) =>
+  `book-vendas-${viewAtiva()}-${S.ano}-${S.per}${S.fGer ? "-" + S.fGer.toLowerCase().replace(/\W+/g, "_") : ""}${S.fVend ? "-" + nomeVend(S.fVend).toLowerCase().replace(/\W+/g, "_") : ""}.${ext}`;
+
+function exportPDF() {
+  $("print-head").innerHTML =
+    `<div class="ph-t">Book de Vendas BR Spices — ${NOMES_VIEW[viewAtiva()]}</div>
+     <div class="ph-s">${esc(contextoTxt())} · gerado em ${new Date().toLocaleString("pt-BR")} por ${esc(S.data.escopo.nome)}</div>
+     <div class="ph-b"></div>`;
+  const nPos0 = S.nPos, nCli0 = S.nCli;
+  S.nPos = 1e6; S.nCli = 1e6;           // imprime as tabelas completas
+  renderAll();
+  const restaurar = () => { S.nPos = nPos0; S.nCli = nCli0; renderAll(); window.onafterprint = null; };
+  window.onafterprint = restaurar;
+  window.print();
+  setTimeout(restaurar, 2000);          // fallback (Safari/afterprint ausente)
+}
+
+let _exceljs = null;
+function comExcelJS() {
+  if (_exceljs) return Promise.resolve(_exceljs);
+  return new Promise((ok, ko) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+    sc.onload = () => ok(_exceljs = window.ExcelJS);
+    sc.onerror = () => ko(new Error("Sem internet para carregar o gerador de Excel."));
+    document.head.appendChild(sc);
+  });
+}
+
+const XL = {
+  ink: "FF183A3F", teal: "FF4F9AA0", zebra: "FFF3F7F7", borda: "FFE4E9EA",
+  money: '"R$" #,##0', pct: "0.0%", num: "#,##0",
+};
+
+function xlTitulo(ws, txt, sub) {
+  ws.addRow([txt]).font = { bold: true, size: 15, color: { argb: XL.ink } };
+  ws.addRow([sub]).font = { size: 10, color: { argb: "FF64737A" } };
+  ws.addRow([]);
+}
+
+function xlTabela(ws, titulo, headers, rows, fmts, widths) {
+  if (titulo) ws.addRow([titulo]).font = { bold: true, size: 12, color: { argb: XL.ink } };
+  const h = ws.addRow(headers);
+  h.eachCell((c) => {
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.ink } };
+    c.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+    c.alignment = { vertical: "middle" };
+    c.border = { bottom: { style: "thin", color: { argb: XL.borda } } };
+  });
+  rows.forEach((r, i) => {
+    const row = ws.addRow(r);
+    row.eachCell((c, col) => {
+      if (fmts && fmts[col - 1]) c.numFmt = fmts[col - 1];
+      if (i % 2) c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.zebra } };
+      c.border = { bottom: { style: "thin", color: { argb: XL.borda } } };
+      c.font = { size: 10 };
+    });
+  });
+  if (widths) widths.forEach((w, i) => { ws.getColumn(i + 1).width = Math.max(ws.getColumn(i + 1).width || 0, w); });
+  ws.addRow([]);
+}
+
+async function exportExcel() {
+  const btn = $("btn-xls");
+  btn.disabled = true; btn.textContent = "Gerando…";
+  try {
+    const ExcelJS = await comExcelJS();
+    const wb = new ExcelJS.Workbook();
+    const rows = linhas(), meses = mesesSel();
+    const v = viewAtiva();
+    const ws = wb.addWorksheet(NOMES_VIEW[v], { views: [{ showGridLines: false }] });
+    xlTitulo(ws, `Book de Vendas BR Spices — ${NOMES_VIEW[v]}`, contextoTxt() +
+      ` · gerado em ${new Date().toLocaleString("pt-BR")} por ${S.data.escopo.nome}`);
+
+    if (v === "geral") {
+      const fat = somaPer(rows, S.ano, meses), ly = somaLY(rows, meses);
+      const meta = metaPer(rows, meses);
+      const vol = S.ano === 2026 ? rows.reduce((s, p) => s + meses.reduce((t, m) => t + (p.q26[m - 1] || 0), 0), 0) : null;
+      const ativos = rows.filter((p) => { const a = serie(p, S.ano); return a && meses.some((m) => a[m - 1]); }).length;
+      xlTabela(ws, "Indicadores", ["Indicador", "Valor"], [
+        ["Faturamento líquido", Math.round(fat)],
+        [`${S.ano - 1} mesmo período`, Math.round(ly)],
+        ["Crescimento", ly > 0 ? (fat - ly) / ly : null],
+        ["Meta do período", meta ? Math.round(meta) : null],
+        ["Atingimento", meta ? fat / meta : null],
+        ["Volume (caixas)", vol == null ? null : Math.round(vol)],
+        ["Ticket médio", ativos ? Math.round(fat / ativos) : null],
+        ["Pedidos em carteira (escopo)", S.data.kpis.carteira],
+        ["Devolução YTD (escopo)", S.data.kpis.devolucao],
+        ["Clientes ativos no período", ativos],
+      ], [null, XL.money], [34, 18]);
+      /* linhas: 6 fat, 7 ly, 8 cresc, 9 meta, 10 ating, 11 volume, 12 ticket, 13 carteira, 14 dev, 15 ativos */
+      ws.getCell("B8").numFmt = XL.pct; ws.getCell("B10").numFmt = XL.pct;
+      ws.getCell("B11").numFmt = XL.num; ws.getCell("B15").numFmt = XL.num;
+      const { ano, mes_atual } = S.data.periodo, me = S.data.meta_empresa_mensal;
+      const evo = [];
+      for (let k = 11; k >= 0; k--) {
+        const idx = ano * 12 + mes_atual - 1 - k, y = Math.floor(idx / 12), m = (idx % 12) + 1;
+        let f = 0, l = 0;
+        for (const c of rows) { const a = serie(c, y), b = serie(c, y - 1); if (a) f += a[m - 1] || 0; if (b) l += b[m - 1] || 0; }
+        const mt = y === 2026 ? ((me && !filtrado()) ? me[m - 1] || 0 : rows.reduce((s, c) => s + (c.meta[m - 1] || 0), 0)) : null;
+        evo.push([`${MESES[m - 1]}/${String(y).slice(2)}`, Math.round(f), Math.round(l), mt ? Math.round(mt) : null]);
+      }
+      xlTabela(ws, "Últimos 12 meses", ["Mês", "Realizado", "Ano anterior", "Meta"], evo,
+        [null, XL.money, XL.money, XL.money], [12, 16, 16, 16]);
+      const c = { ok: 0, atencao: 0, validar: 0, acionar: 0 };
+      rows.forEach((p) => c[p.status]++);
+      xlTabela(ws, "Semáforo da base", ["Status", "Clientes"],
+        [["Comprou no mês", c.ok], ["1 mês sem compra", c.atencao], ["2 meses — validar", c.validar], ["3+ meses — acionar", c.acionar]],
+        [null, XL.num], [24, 12]);
+      xlTabela(ws, "Top famílias (YTD escopo)", ["Família", "Faturamento"],
+        (S.data.familias || []).slice(0, 10).map((f) => [f.nome, Math.round(f.fat)]), [null, XL.money], [26, 16]);
+
+    } else if (v === "metas") {
+      const nivel = (S.data.escopo.perfil === "gestor" && !S.fGer && !S.fVend) ? "ger"
+        : (S.data.escopo.perfil !== "vendedor" && !S.fVend) ? "vend" : "cliente";
+      const grupos = agrupar(rows, nivel, meses);
+      xlTabela(ws, `Por ${nivel === "ger" ? "gerente" : nivel === "vend" ? "vendedor" : "cliente"} — ${rotuloPer()} ${S.ano}`,
+        ["Nome", "Meta", "Realizado", "Ating.", "Gap"],
+        grupos.map((o) => [nomeVend(o.nome), o.meta ? Math.round(o.meta) : null, Math.round(o.realizado),
+          o.ating, o.meta ? Math.round(o.realizado - o.meta) : null]),
+        [null, XL.money, XL.money, XL.pct, XL.money], [34, 15, 15, 10, 15]);
+      const cli = rows.map((p) => {
+        let mt = 0, re = 0;
+        for (const m of meses) { mt += p.meta[m - 1] || 0; const a = serie(p, S.ano); if (a) re += a[m - 1] || 0; }
+        return { p, mt, re };
+      }).filter((x) => x.mt > 0).sort((a, b) => (a.re - a.mt) - (b.re - b.mt));
+      xlTabela(ws, "Gaps por cliente (todos)", ["Cliente", "Vendedor", "Meta", "Realizado", "Ating.", "Gap"],
+        cli.map(({ p, mt, re }) => [p.cliente, nomeVend(p.vend), Math.round(mt), Math.round(re), re / mt, Math.round(re - mt)]),
+        [null, null, XL.money, XL.money, XL.pct, XL.money], [34, 24, 15, 15, 10, 15]);
+
+    } else if (v === "posit") {
+      let r = rows;
+      if (S.fStatus) r = r.filter((p) => p.status === S.fStatus);
+      if (S.busca) r = r.filter((p) => p.cliente.toLowerCase().includes(S.busca.toLowerCase()));
+      r = [...r].sort((a, b) => (b.perdido || 0) - (a.perdido || 0) || sum26(b) - sum26(a));
+      xlTabela(ws, `Positivados — semáforo de recência (${r.length} clientes)`,
+        ["Cliente", "Vendedor", "Gerente", "UF", "CNPJs", "Últ. compra", "Meses sem compra", "Status", "Média/mês", "Em risco", "Fat 2026 YTD"],
+        r.map((p) => [p.cliente, nomeVend(p.vend), p.ger, p.uf, p.cnpjs,
+          p.ult ? fmtData(p.ult) : "—", p.meses_sem >= 99 ? null : p.meses_sem,
+          (ST[p.status] || ST.acionar).nome, Math.round(p.media), p.perdido ? Math.round(p.perdido) : null, Math.round(sum26(p))]),
+        [null, null, null, null, XL.num, null, XL.num, null, XL.money, XL.money, XL.money],
+        [34, 24, 22, 8, 8, 12, 10, 20, 14, 14, 15]);
+
+    } else if (v === "rank") {
+      if (S.data.escopo.perfil === "gestor" && !S.fGer)
+        xlTabela(ws, "Gerentes", ["#", "Gerente", "Faturamento"],
+          agrupar(rows, "ger", meses).map((o, i) => [i + 1, o.nome, Math.round(o.realizado)]),
+          [XL.num, null, XL.money], [5, 30, 16]);
+      if (S.data.escopo.perfil !== "vendedor")
+        xlTabela(ws, "Vendedores", ["#", "Vendedor", "Faturamento"],
+          agrupar(rows, "vend", meses).map((o, i) => [i + 1, nomeVend(o.nome), Math.round(o.realizado)]),
+          [XL.num, null, XL.money], [5, 30, 16]);
+      const cli = rows.map((p) => { let f = 0; const a = serie(p, S.ano); if (a) for (const m of meses) f += a[m - 1] || 0; return { p, f }; })
+        .sort((x, y) => y.f - x.f).slice(0, 50);
+      xlTabela(ws, "Clientes (top 50)", ["#", "Cliente", "Vendedor", "UF", "Faturamento"],
+        cli.map(({ p, f }, i) => [i + 1, p.cliente, nomeVend(p.vend), p.uf, Math.round(f)]),
+        [XL.num, null, null, null, XL.money], [5, 34, 24, 8, 16]);
+      xlTabela(ws, "Famílias (YTD escopo)", ["#", "Família", "Faturamento"],
+        (S.data.familias || []).map((f, i) => [i + 1, f.nome, Math.round(f.fat)]),
+        [XL.num, null, XL.money], [5, 28, 16]);
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf],
+      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = arquivoNome("xlsx"); a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("Não foi possível gerar o Excel: " + (e.message || e));
+  } finally {
+    btn.disabled = false; btn.textContent = "⬇ Excel";
+  }
+}
+
 /* ---------------- navegação e eventos ---------------- */
 function trocarView(v) {
   document.querySelectorAll(".nav-i[data-v]").forEach((x) => x.classList.toggle("act", x.dataset.v === v));
@@ -516,6 +702,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".nav-i[data-v]").forEach((el) => el.addEventListener("click", () => trocarView(el.dataset.v)));
   ["f-ger", "f-vend", "f-ano", "f-per"].forEach((id) => $(id)?.addEventListener("change", onFiltro));
   $("btn-reset").addEventListener("click", limparFiltros);
+  $("btn-pdf").addEventListener("click", exportPDF);
+  $("btn-xls").addEventListener("click", exportExcel);
   $("who-sair").addEventListener("click", sair);
   $("btn-atualizar").addEventListener("click", () =>
     alert("Atualização automática entra na próxima fase.\nPor enquanto os dados são republicados pelo administrador."));

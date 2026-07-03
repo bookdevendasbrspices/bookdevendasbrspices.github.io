@@ -182,7 +182,26 @@ td b{font-weight:650}
 .more:hover{color:var(--teal-d);border-color:var(--teal)}
 .empty{color:var(--soft);font-size:13px;text-align:center;padding:22px}
 
-@media(max-width:920px){
+.exp{color:var(--teal-d);border-color:rgba(79,154,160,.45)}
+.exp:hover{color:#fff;background:var(--teal-d);border-color:var(--teal-d)}
+
+/* ================= impressão / PDF ================= */
+#print-head{padding:0 0 14px}
+#print-head .ph-t{font-size:20px;font-weight:700;color:#183A3F}
+#print-head .ph-s{font-size:12px;color:#64737a;margin-top:3px}
+#print-head .ph-b{height:4px;width:180px;background:linear-gradient(90deg,#183A3F,#74AFAE);border-radius:4px;margin-top:8px}
+@media print{
+  @page{size:A4 landscape;margin:12mm}
+  body{background:#fff}
+  header.top,aside,.topbar,.tctl,.more,#login,.mockbar{display:none!important}
+  main{margin:0!important;padding:0!important;max-width:none!important}
+  #print-head{display:block!important}
+  .card,.kpi{box-shadow:none!important;border:1px solid #d5dcde;break-inside:avoid}
+  .kpi:hover{transform:none}
+  h2.pg,.sub{display:none}
+  .grid.duo,.grid.trio{grid-template-columns:1fr 1fr}
+  a{text-decoration:none;color:inherit}
+}
   header.top .tt span,.hchip{display:none}
   aside{position:static;width:100%;flex-direction:row;align-items:center;top:auto;margin-top:58px}
   #app.on{display:flex;flex-direction:column}
