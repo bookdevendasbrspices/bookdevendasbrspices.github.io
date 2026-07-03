@@ -57,9 +57,9 @@ header.top .sp{flex:1}
 
 aside{position:fixed;left:0;top:58px;bottom:0;width:230px;background:var(--ink);
   display:flex;flex-direction:column;overflow-y:auto;z-index:40}
-.sbrand{background:#fff;border-radius:14px;margin:14px 12px 4px;padding:10px 12px;text-align:center;
-  box-shadow:0 4px 14px rgba(0,0,0,.25)}
-.sbrand img{width:100%;max-width:190px;height:auto;display:block;margin:0 auto}
+.sbrand{margin:16px 10px 2px;text-align:center}
+.sbrand img{width:100%;max-width:204px;height:auto;display:block;margin:0 auto;
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
 nav{padding:12px 10px;flex:1}
 .nsec{font-size:10px;color:var(--ink-m);letter-spacing:.16em;text-transform:uppercase;padding:14px 10px 6px}
 .nav-i{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;cursor:pointer;
