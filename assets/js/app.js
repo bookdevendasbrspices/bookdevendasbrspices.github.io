@@ -82,8 +82,10 @@ function boot() {
   $("login").style.display = "none";
   $("app").classList.add("on");
 
-  const perfilTxt = { gestor: "GESTÃO — VÊ TUDO", gerente: "GERENTE — SUA EQUIPE", vendedor: "VENDEDOR — SUA CARTEIRA" }[d.escopo.perfil] || d.escopo.perfil;
-  $("who-nome").textContent = d.escopo.perfil === "gestor" ? "Fernando Oliveira" : d.escopo.nome;
+  const perfilTxt = d.escopo.cargo ||
+    ({ gestor: "GESTÃO — VÊ TUDO", gerente: "GERENTE — SUA EQUIPE", vendedor: "VENDEDOR — SUA CARTEIRA" }[d.escopo.perfil] || d.escopo.perfil);
+  $("who-nome").textContent = d.escopo.nome;
+  $("who-email").textContent = d.escopo.email || "";
   $("who-pill").textContent = "PERFIL: " + perfilTxt;
   const mesNome = MESES[d.periodo.mes_atual - 1];
   $("hchip").innerHTML = `📅 <b>${d.periodo.ano} · YTD (jan–${mesNome})</b> · atualizado <b>${fmtData(d.atualizado_ate)}</b>`;

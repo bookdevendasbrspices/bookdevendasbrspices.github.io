@@ -45,6 +45,13 @@ SENHAS_JSON = os.path.join(TOOLS_DIR, "senhas.local.json")
 SENHAS_TXT = os.path.join(TOOLS_DIR, "senhas.local.txt")
 
 FAM_EXCLUIDAS = {"MAQUINA", "SACOS", "USO E CONSUMO"}
+
+# Acessos de visão completa (nome, cargo exibido, e-mail de referência)
+ACESSO_TOTAL = [
+    ("FERNANDO OLIVEIRA", "ADMINISTRADOR", "fernando.oliveira.fer85@gmail.com"),
+    ("RICARDO GOBATTO", "DIRETOR COMERCIAL", "rgobatto@brspices.com.br"),
+    ("GABRIEL DANIEL", "CEO", "gabriel@brspices.com.br"),
+]
 ANOS_MINIMO = 2025          # v1 usa 2025 (comparativo) + 2026
 PBKDF2_ITER = 310_000
 MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
@@ -164,7 +171,7 @@ def _round(d, nd=2):
     return {k: (round(v, nd) if isinstance(v, float) else v) for k, v in d.items()}
 
 
-def montar_json(escopo_perfil, escopo_nome, cnpjs, ctx):
+def montar_json(escopo_perfil, escopo_nome, cnpjs, ctx, extra=None):
     """Monta o JSON de dados para um escopo (conjunto de CNPJs visíveis)."""
     fat, dev, cart, metas = ctx["fat"], ctx["dev"], ctx["cart"], ctx["metas"]
     hoje = ctx["hoje"]
@@ -315,7 +322,7 @@ def montar_json(escopo_perfil, escopo_nome, cnpjs, ctx):
     return {
         "gerado_em": hoje.strftime("%Y-%m-%d %H:%M"),
         "atualizado_ate": ctx["max_emissao"].strftime("%Y-%m-%d"),
-        "escopo": {"perfil": escopo_perfil, "nome": escopo_nome},
+        "escopo": {"perfil": escopo_perfil, "nome": escopo_nome, **(extra or {})},
         "periodo": {"ano": ano, "mes_atual": mes_atual,
                     "mes_atual_nome": MESES_PT[mes_atual - 1]},
         "kpis": _round({
@@ -358,17 +365,18 @@ def main():
     print(f"Faturamento: {len(fat)} linhas úteis | última emissão {max_emissao:%d/%m/%Y}")
     print(f"Metas: {len(metas)} CNPJs | Devolução: {len(dev)} | Carteira: {len(cart)}")
 
-    # escopos: gestor + cada gerente (GR_BRS) + cada vendedor (VEND_BRS)
+    # escopos: visão completa (admin/diretoria) + cada gerente + cada vendedor
     cnpjs_todos = set(metas["CNPJ_N"]) | set(fat["CNPJ_N"])
-    escopos = [("gestor", "GESTOR", cnpjs_todos)]
+    escopos = [("gestor", nome, cnpjs_todos, {"cargo": cargo, "email": email})
+               for nome, cargo, email in ACESSO_TOTAL]
     for g in sorted(x for x in metas["GR_BRS"].unique() if x):
         cnpjs = set(metas.loc[metas["GR_BRS"] == g, "CNPJ_N"])
         if cnpjs:
-            escopos.append(("gerente", g, cnpjs))
+            escopos.append(("gerente", g, cnpjs, None))
     for v in sorted(x for x in metas["VEND_BRS"].unique() if x):
         cnpjs = set(metas.loc[metas["VEND_BRS"] == v, "CNPJ_N"])
         if cnpjs:
-            escopos.append(("vendedor", v, cnpjs))
+            escopos.append(("vendedor", v, cnpjs, None))
 
     # senhas persistentes entre execuções
     senhas = {}
@@ -376,17 +384,25 @@ def main():
         with open(SENHAS_JSON, encoding="utf-8") as fh:
             senhas = json.load(fh)
 
+    # remove senhas de escopos que deixaram de existir (ex.: antigo "gestor|GESTOR")
+    chaves_atuais = {f"{p}|{n}" for p, n, _, _ in escopos}
+    for chave in [k for k in senhas if k not in chaves_atuais]:
+        print(f"  senha descartada (escopo extinto): {chave}")
+        del senhas[chave]
+
     os.makedirs(DATA_DIR, exist_ok=True)
     arquivos_gerados = set()
     print(f"\nGerando {len(escopos)} arquivos por perfil...")
-    for perfil, nome, cnpjs in escopos:
+    for perfil, nome, cnpjs, extra in escopos:
         chave = f"{perfil}|{nome}"
         if chave not in senhas:
             senhas[chave] = {"senha": gerar_senha(), "perfil": perfil, "nome": nome}
+        if extra:
+            senhas[chave].update(extra)
         senha = senhas[chave]["senha"]
         arq = nome_arquivo(senha)
         senhas[chave]["arquivo"] = arq
-        payload = montar_json(perfil, nome, cnpjs, ctx)
+        payload = montar_json(perfil, nome, cnpjs, ctx, extra)
         with open(os.path.join(DATA_DIR, arq), "w", encoding="utf-8") as fh:
             json.dump(criptografar(payload, senha), fh)
         arquivos_gerados.add(arq)
@@ -410,9 +426,12 @@ def main():
     with open(SENHAS_TXT, "w", encoding="utf-8") as fh:
         fh.write("RADAR BR SPICES — SENHAS DE ACESSO (CONFIDENCIAL — não commitar)\n")
         fh.write(f"Gerado em {inicio:%d/%m/%Y %H:%M}\n\n")
-        for chave in sorted(senhas, key=lambda k: (senhas[k]["perfil"], senhas[k]["nome"])):
+        ordem = {"gestor": 0, "gerente": 1, "vendedor": 2}
+        for chave in sorted(senhas, key=lambda k: (ordem.get(senhas[k]["perfil"], 9), senhas[k]["nome"])):
             s = senhas[chave]
-            fh.write(f"{s['perfil'].upper():9s} {s['nome']:35s} senha: {s['senha']}\n")
+            rotulo = s.get("cargo", s["perfil"].upper())
+            extra = f"  ({s['email']})" if s.get("email") else ""
+            fh.write(f"{rotulo:18s} {s['nome']:32s} senha: {s['senha']}{extra}\n")
     print(f"\nSenhas em: {SENHAS_TXT}")
     print(f"Concluído em {(datetime.now() - inicio).total_seconds():.0f}s")
 
