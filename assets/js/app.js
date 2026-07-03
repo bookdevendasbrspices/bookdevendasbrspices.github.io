@@ -1,9 +1,9 @@
-/* Book de Vendas BR Spices — app v1 (Fase 2/3)
-   Login: senha → SHA-256 → data/<hash16>.enc.json → PBKDF2-SHA256 + AES-GCM (WebCrypto).
-   Nenhum dado aberto sai do navegador; a senha nunca é enviada a lugar algum. */
+/* Book de Vendas BR Spices — app v2 (schema 2: séries mensais por CLIENTE-BANDEIRA)
+   Login: senha → SHA-256 → data/<hash>.enc.json → PBKDF2 + AES-GCM (WebCrypto). */
 "use strict";
 
-const S = { data: null, fGer: "", fVend: "", nPos: 100, nCli: 50, fStatus: "", busca: "", buscaMeta: "" };
+const S = { data: null, fGer: "", fVend: "", ano: 2026, per: "ytd",
+            nPos: 100, nCli: 50, fStatus: "", busca: "", buscaMeta: "", fracMes: 1 };
 const $ = (id) => document.getElementById(id);
 const MESES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 
@@ -16,7 +16,7 @@ function fmtM(v) {
   if (a >= 1e3) return "R$ " + fmtBR(v / 1e3, 0) + "K";
   return "R$ " + fmtBR(v, 0);
 }
-function fmtK(v) {
+function fmtNum(v) {
   if (v == null) return "—";
   const a = Math.abs(v);
   if (a >= 1e6) return fmtBR(v / 1e6, 1) + "M";
@@ -30,7 +30,6 @@ function fmtData(iso) {
   return `${d}/${m}/${a}`;
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-/* nome do vendedor sem o prefixo numérico ("042 - WAGNER TORTELLI" → "WAGNER TORTELLI") */
 const nomeVend = (v) => String(v ?? "").replace(/^\s*\d+\s*-\s*/, "");
 
 /* ---------------- criptografia ---------------- */
@@ -61,8 +60,8 @@ async function entrar() {
     const hash = await sha256hex(senha);
     const res = await fetch("data/" + hash.slice(0, 16) + ".enc.json", { cache: "no-store" });
     if (!res.ok) throw new Error("Senha não encontrada. Confira e tente de novo.");
-    const payload = await res.json();
-    S.data = await decriptar(payload, senha);
+    S.data = await decriptar(await res.json(), senha);
+    if (S.data.schema !== 2) throw new Error("Dados desatualizados — peça ao Fernando para republicar.");
     sessionStorage.setItem("bv_dados", JSON.stringify(S.data));
     boot();
   } catch (e) {
@@ -78,6 +77,53 @@ function sair() {
   location.reload();
 }
 
+/* ---------------- período ---------------- */
+function mesesSel() {
+  const mAtual = S.data.periodo.mes_atual;
+  if (S.per === "ytd") return Array.from({ length: mAtual }, (_, i) => i + 1);
+  if (S.per === "ano") return Array.from({ length: 12 }, (_, i) => i + 1);
+  const q = /^q([1-4])$/.exec(S.per);
+  if (q) { const b = (q[1] - 1) * 3; return [b + 1, b + 2, b + 3]; }
+  return [parseInt(S.per, 10)];
+}
+const rotuloPer = () => S.per === "ytd" ? `YTD (jan–${MESES[S.data.periodo.mes_atual - 1]})`
+  : S.per === "ano" ? "Ano completo"
+  : /^q\d$/.test(S.per) ? S.per.toUpperCase()
+  : MESES[S.per - 1];
+
+function serie(c, ano) { return ano === 2026 ? c.m26 : ano === 2025 ? c.m25 : ano === 2024 ? c.m24 : null; }
+
+function somaPer(rows, ano, meses) {
+  let s = 0;
+  for (const c of rows) { const a = serie(c, ano); if (a) for (const m of meses) s += a[m - 1] || 0; }
+  return s;
+}
+/* ano anterior no mesmo período; mês corrente entra pro-rata (dias decorridos) */
+function somaLY(rows, meses) {
+  const { ano, mes_atual } = S.data.periodo;
+  let s = 0;
+  for (const c of rows) {
+    const a = serie(c, S.ano - 1); if (!a) continue;
+    for (const m of meses) {
+      let v = a[m - 1] || 0;
+      if (S.ano === ano && m === mes_atual) v *= S.fracMes;
+      s += v;
+    }
+  }
+  return s;
+}
+function metaPer(rows, meses) {
+  if (S.ano !== 2026) return null;
+  /* no YTD, a meta do mês corrente entra pro-rata (dias decorridos) */
+  const peso = (m) => (S.per === "ytd" && S.ano === S.data.periodo.ano &&
+                       m === S.data.periodo.mes_atual) ? S.fracMes : 1;
+  const me = S.data.meta_empresa_mensal;
+  if (me && !filtrado()) return meses.reduce((s, m) => s + (me[m - 1] || 0) * peso(m), 0);
+  let s = 0;
+  for (const c of rows) for (const m of meses) s += (c.meta[m - 1] || 0) * peso(m);
+  return s;
+}
+
 /* ---------------- boot ---------------- */
 function boot() {
   const d = S.data;
@@ -89,12 +135,21 @@ function boot() {
   $("who-nome").textContent = d.escopo.nome;
   $("who-email").textContent = d.escopo.email || "";
   $("who-pill").textContent = "PERFIL: " + perfilTxt;
-  const mesNome = MESES[d.periodo.mes_atual - 1];
-  $("hchip").innerHTML = `📅 <b>${d.periodo.ano} · YTD (jan–${mesNome})</b> · atualizado <b>${fmtData(d.atualizado_ate)}</b>`;
-  $("chip-periodo").textContent = `${d.periodo.ano} · YTD (jan–${mesNome}) · dados até ${fmtData(d.atualizado_ate)}`;
+  $("hchip").innerHTML = `📅 dados até <b>${fmtData(d.atualizado_ate)}</b>`;
 
-  // filtros por perfil
-  const gers = [...new Set(d.positivados.map((p) => p.ger))].filter(Boolean).sort();
+  // fração do mês corrente decorrida (p/ comparar 2025 pro-rata)
+  const dt = new Date(d.atualizado_ate + "T12:00:00");
+  S.fracMes = dt.getDate() / new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+
+  // seletor de período
+  $("f-per").innerHTML =
+    `<option value="ytd">YTD (jan–${MESES[d.periodo.mes_atual - 1]})</option>` +
+    `<option value="ano">Ano completo</option>` +
+    ["q1", "q2", "q3", "q4"].map((q) => `<option value="${q}">${q.toUpperCase()}</option>`).join("") +
+    MESES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+  $("f-ano").innerHTML = `<option>2026</option><option>2025</option>`;
+
+  const gers = [...new Set(d.clientes.map((p) => p.ger))].filter(Boolean).sort();
   if (d.escopo.perfil === "gestor") preencherSelect("f-ger", gers);
   else $("f-ger-wrap").style.display = "none";
   if (d.escopo.perfil === "vendedor") $("f-vend-wrap").style.display = "none";
@@ -104,15 +159,13 @@ function boot() {
 }
 
 function preencherSelect(id, itens, labelFn) {
-  const el = $(id);
-  el.innerHTML = '<option value="">Todos</option>' +
+  $(id).innerHTML = '<option value="">Todos</option>' +
     itens.map((x) => `<option value="${esc(x)}">${esc(labelFn ? labelFn(x) : x)}</option>`).join("");
 }
 
-/* o combo de vendedores mostra só quem pertence ao gerente filtrado */
 function atualizarVendSelect() {
   if ($("f-vend-wrap").style.display === "none") return;
-  const base = S.fGer ? S.data.positivados.filter((p) => p.ger === S.fGer) : S.data.positivados;
+  const base = S.fGer ? S.data.clientes.filter((p) => p.ger === S.fGer) : S.data.clientes;
   const vends = [...new Set(base.map((p) => p.vend))].filter(Boolean)
     .sort((a, b) => nomeVend(a).localeCompare(nomeVend(b), "pt-BR"));
   preencherSelect("f-vend", vends, nomeVend);
@@ -123,59 +176,50 @@ function atualizarVendSelect() {
 function onFiltro() {
   S.fGer = $("f-ger-wrap").style.display === "none" ? "" : $("f-ger").value;
   S.fVend = $("f-vend-wrap").style.display === "none" ? "" : $("f-vend").value;
+  S.ano = parseInt($("f-ano").value, 10);
+  S.per = $("f-per").value;
   atualizarVendSelect();
   S.nPos = 100; S.nCli = 50;
   renderAll();
 }
 
-function resetar() {
+function limparFiltros() {
   if ($("f-ger")) $("f-ger").value = "";
   if ($("f-vend")) $("f-vend").value = "";
+  $("f-ano").value = "2026"; $("f-per").value = "ytd";
   S.fStatus = ""; S.busca = ""; S.buscaMeta = "";
   $("busca-pos").value = ""; $("busca-meta").value = "";
+  document.querySelectorAll(".fchip[data-st]").forEach((x) => x.classList.remove("on"));
   onFiltro();
 }
 
-/* ---------------- dados filtrados ---------------- */
 function linhas() {
-  let r = S.data.positivados;
+  let r = S.data.clientes;
   if (S.fGer) r = r.filter((p) => p.ger === S.fGer);
   if (S.fVend) r = r.filter((p) => p.vend === S.fVend);
   return r;
 }
 const filtrado = () => !!(S.fGer || S.fVend);
 
-function agrupar(rows, campo) {
-  const g = {};
-  for (const p of rows) {
-    const k = p[campo] || "SEM CADASTRO";
-    const o = (g[k] ??= { nome: k, meta_ytd: 0, meta_ano: 0, realizado: 0, realizado_ly: 0, clientes: 0, positivados: 0 });
-    o.meta_ytd += p.meta_ytd; o.meta_ano += p.meta_ano;
-    o.realizado += p.fat_ytd; o.realizado_ly += p.fat_ly;
-    o.clientes++; if (p.status === "ok") o.positivados++;
-  }
-  return Object.values(g).map((o) => (o.ating = o.meta_ytd ? o.realizado / o.meta_ytd : null, o))
-    .sort((a, b) => b.realizado - a.realizado);
-}
-
 /* ---------------- render ---------------- */
 function renderAll() {
-  const rows = linhas();
-  renderChipFiltro();
-  renderKpis(rows);
+  const rows = linhas(), meses = mesesSel();
+  renderChips();
+  renderKpis(rows, meses);
   renderEvolucao(rows);
   renderSemaforo(rows);
   renderFamilias();
-  renderMetas(rows);
+  renderMetas(rows, meses);
   renderPositivados(rows);
-  renderRankings(rows);
+  renderRankings(rows, meses);
 }
 
-function renderChipFiltro() {
+function renderChips() {
+  $("chip-periodo").textContent = `${S.ano} · ${rotuloPer()} · dados até ${fmtData(S.data.atualizado_ate)}`;
   const f = [];
   if (S.fGer) f.push("Gerente: " + S.fGer);
   if (S.fVend) f.push("Vendedor: " + nomeVend(S.fVend));
-  $("chip-filtro").textContent = f.length ? f.join(" · ") : "";
+  $("chip-filtro").textContent = f.join(" · ");
   $("chip-filtro").style.display = f.length ? "" : "none";
 }
 
@@ -193,115 +237,114 @@ const IC = {
   pos: '<svg viewBox="0 0 24 24" fill="none" stroke="#5d8756" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 11l2 2 4-4"/></svg>',
 };
 
-function renderKpis(rows) {
+function renderKpis(rows, meses) {
   const d = S.data, k = d.kpis;
-  let fat, ly, lyLabel, meta, base, posit, cresc;
-  if (!filtrado()) {
-    fat = k.fat_liq_ytd; ly = k.fat_liq_ly_mp; lyLabel = "vs 2025 (mesmo período)";
-    meta = k.meta_ytd; base = k.clientes_base; posit = k.positivados_mes;
-    cresc = k.cresc_ytd;
-  } else {
-    fat = rows.reduce((s, p) => s + p.fat_ytd, 0);
-    ly = rows.reduce((s, p) => s + p.fat_ly, 0); lyLabel = "vs 2025 (ano cheio)";
-    meta = rows.reduce((s, p) => s + p.meta_ytd, 0);
-    base = rows.filter((p) => p.meta_ano > 0 || p.fat_ytd !== 0).length;
-    posit = rows.filter((p) => p.status === "ok").length;
-    cresc = ly > 0 ? (fat - ly) / ly : null;
-  }
+  const fat = somaPer(rows, S.ano, meses);
+  const ly = somaLY(rows, meses);
+  const cresc = ly > 0 ? (fat - ly) / ly : null;
+  const meta = metaPer(rows, meses);
   const ating = meta ? fat / meta : null;
+  const gap = meta ? fat - meta : null;
+
+  const ehYtd = S.per === "ytd", noMes = ehYtd && S.ano === d.periodo.ano;
+  const positivados = noMes
+    ? rows.filter((p) => p.status === "ok").length
+    : rows.filter((p) => { const a = serie(p, S.ano); return a && meses.some((m) => a[m - 1]); }).length;
+  const base = rows.filter((p) => p.meta.some((v) => v) || p.m26.some((v) => v) ||
+    (S.ano === 2025 && p.m25.some((v) => v))).length;
+  const vol = S.ano === 2026 ? rows.reduce((s, p) => s + meses.reduce((t, m) => t + (p.q26[m - 1] || 0), 0), 0) : null;
+  const ativosPer = rows.filter((p) => { const a = serie(p, S.ano); return a && meses.some((m) => a[m - 1]); }).length;
+  const ticket = ativosPer ? fat / ativosPer : null;
+
   const crescPill = cresc == null ? "" :
     `<span class="dl ${cresc >= 0 ? "up" : "dn"}">${cresc >= 0 ? "▲" : "▼"} ${fmtPct(Math.abs(cresc))}</span> `;
-  const atingCor = ating == null ? "" : ating >= 1 ? "var(--ok)" : ating >= 0.9 ? "var(--warn)" : "var(--bad)";
-  const gap = meta ? fat - meta : null;
-  const esc0 = filtrado() ? '<span style="color:var(--soft)">escopo total (sem filtro)</span>' : "";
+  const atingCor = ating == null ? "var(--soft)" : ating >= 1 ? "var(--ok)" : ating >= 0.9 ? "var(--warn)" : "var(--bad)";
+  const escT = '<span style="color:var(--soft)">escopo total (sem filtro)</span>';
 
   $("kpis").innerHTML =
-    kpiCard(IC.fat, "#2f7d7c", "Faturamento<br>líquido YTD", fmtM(fat), crescPill + lyLabel + ` (${fmtM(ly)})`) +
-    kpiCard(IC.meta, "#E0A339", "Atingimento<br>da meta YTD",
-      `<span style="color:${atingCor}">${fmtPct(ating)}</span>`,
-      meta ? `meta ${fmtM(meta)} · ${gap >= 0 ? "sobra" : "gap"} <b style="color:${gap >= 0 ? "var(--ok)" : "var(--bad)"}">${fmtM(Math.abs(gap))}</b>` : "sem meta cadastrada") +
-    (filtrado()
-      ? kpiCard(IC.vol, "#9B9741", "Clientes<br>na seleção", fmtBR(rows.length), "clientes no filtro atual")
-      : kpiCard(IC.vol, "#9B9741", "Volume<br>(caixas)", fmtK(k.qtd_liq_ytd), "caixas líquidas no ano")) +
-    kpiCard(IC.cart, "#4f9aa0", "Pedidos<br>em carteira", filtrado() ? "—" : fmtM(k.carteira), filtrado() ? esc0 : "snapshot " + fmtData(d.atualizado_ate)) +
-    kpiCard(IC.dev, "#C96643", "Devolução<br>" + d.periodo.ano, filtrado() ? "—" : fmtM(k.devolucao),
-      filtrado() ? esc0 : (k.fat_liq_ytd ? fmtPct(k.devolucao / (k.fat_liq_ytd + k.devolucao)) + " do faturamento bruto" : "")) +
-    kpiCard(IC.pos, "#8AAB83", "Positivados<br>no mês", `${fmtBR(posit)}<small>/${fmtBR(base)}</small>`,
-      base ? `<b style="color:var(--teal-d)">${fmtPct(posit / base)}</b> da base ativa` : "");
+    kpiCard(IC.fat, "#2f7d7c", `Faturamento<br>líquido · ${rotuloPer()}`, fmtM(fat),
+      crescPill + `vs ${S.ano - 1} mesmo período (${fmtM(ly)})`) +
+    kpiCard(IC.meta, "#E0A339", "Atingimento<br>da meta", `<span style="color:${atingCor}">${fmtPct(ating)}</span>`,
+      meta ? `meta ${fmtM(meta)} · ${gap >= 0 ? "sobra" : "falta"} <b style="color:${gap >= 0 ? "var(--ok)" : "var(--bad)"}">${fmtM(Math.abs(gap))}</b>`
+           : "sem meta no período/seleção") +
+    kpiCard(IC.vol, "#9B9741", "Volume<br>(caixas)", vol == null ? "—" : fmtNum(vol),
+      ticket ? `Ticket médio <b>${fmtM(ticket)}</b>` : "Ticket médio —") +
+    kpiCard(IC.cart, "#4f9aa0", "Pedidos<br>em carteira", filtrado() ? "—" : fmtM(k.carteira),
+      filtrado() ? escT : "snapshot " + fmtData(d.atualizado_ate)) +
+    kpiCard(IC.dev, "#C96643", `Devolução<br>${d.periodo.ano} YTD`, filtrado() ? "—" : fmtM(k.devolucao),
+      filtrado() ? escT : "já abatida do líquido") +
+    kpiCard(IC.pos, "#8AAB83", `Positivados<br>${noMes ? "no mês" : "no período"}`,
+      `${fmtBR(positivados)}<small>/${fmtBR(base)}</small>`,
+      base ? `<b style="color:var(--teal-d)">${fmtPct(positivados / base)}</b> da base` : "");
 }
 
+/* ---------- evolução: sempre os últimos 12 meses ---------- */
 function renderEvolucao(rows) {
-  const d = S.data;
-  let itens, temMeta, temLy, titulo;
-  if (!filtrado()) {
-    itens = d.evolucao.map((e) => ({ label: e.mes, fat: e.fat, ly: e.fat_ly, meta: e.meta }));
-    temMeta = itens.some((i) => i.meta > 0); temLy = true;
-    titulo = "Evolução mensal — Realizado × Meta × " + (d.periodo.ano - 1);
-  } else {
-    // com filtro: soma o histórico de 7 meses por cliente
-    const n = 7, mAtual = d.periodo.mes_atual, ano = d.periodo.ano;
-    itens = [];
-    for (let kIdx = n - 1; kIdx >= 0; kIdx--) {
-      const idx = ano * 12 + mAtual - kIdx - 1;
-      const mes = idx % 12, a = Math.floor(idx / 12);
-      itens.push({ label: MESES[mes] + (a !== ano ? "/" + String(a).slice(2) : ""), fat: 0 });
+  const { ano, mes_atual } = S.data.periodo;
+  const me = S.data.meta_empresa_mensal;
+  const itens = [];
+  for (let k = 11; k >= 0; k--) {
+    const idx = ano * 12 + mes_atual - 1 - k;
+    const y = Math.floor(idx / 12), m = (idx % 12) + 1;
+    let fat = 0, ly = 0, meta = 0;
+    for (const c of rows) {
+      const a = serie(c, y), b = serie(c, y - 1);
+      if (a) fat += a[m - 1] || 0;
+      if (b) ly += b[m - 1] || 0;
     }
-    for (const p of rows) for (let i = 0; i < n; i++) itens[i].fat += p.hist[i] || 0;
-    temMeta = false; temLy = false;
-    titulo = "Evolução — últimos 7 meses (filtro aplicado)";
+    if (y === 2026) meta = (me && !filtrado()) ? (me[m - 1] || 0)
+      : rows.reduce((s, c) => s + (c.meta[m - 1] || 0), 0);
+    itens.push({ label: MESES[m - 1] + (y !== ano ? "/" + String(y).slice(2) : ""), fat, ly, meta, parcial: y === ano && m === mes_atual });
   }
-  $("evo-titulo").innerHTML = titulo + ' <span class="rg">R$</span>';
-  $("evo-chart").innerHTML = svgBarras(itens, temLy, temMeta);
+  $("evo-titulo").innerHTML = `Últimos 12 meses — Realizado × Ano anterior × Meta <span class="rg">R$</span>`;
+  $("evo-chart").innerHTML = svgEvolucao(itens);
   $("evo-leg").innerHTML =
-    `<span><i style="background:linear-gradient(180deg,#74AFAE,#2f7d7c)"></i>Realizado ${d.periodo.ano}</span>` +
-    (temLy ? `<span><i style="background:#dde3e5"></i>${d.periodo.ano - 1}</span>` : "") +
-    (temMeta ? `<span><i style="background:#C96643"></i>Meta (linha)</span>` : "") +
-    `<span style="margin-left:auto">${MESES[d.periodo.mes_atual - 1]} = parcial</span>`;
+    `<span><i style="background:linear-gradient(180deg,#74AFAE,#2f7d7c)"></i>Realizado</span>` +
+    `<span><i style="background:#dde3e5"></i>Mesmo mês do ano anterior</span>` +
+    `<span><i style="background:#C96643"></i>Meta (linha)</span>` +
+    `<span style="margin-left:auto">${MESES[mes_atual - 1]} = parcial</span>`;
 }
 
-function svgBarras(itens, temLy, temMeta) {
-  const W = 640, H = 216, base = 190, topo = 16;
+function svgEvolucao(itens) {
+  const W = 720, H = 240, base = 196, topo = 34;
   const n = itens.length, passo = W / n;
-  const max = Math.max(1, ...itens.map((i) => Math.max(i.fat || 0, i.ly || 0, i.meta || 0)));
+  const max = Math.max(1, ...itens.map((i) => Math.max(i.fat, i.ly, i.meta)));
   const y = (v) => base - (v / max) * (base - topo);
+  const wB = Math.min(17, passo * 0.32);
   let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%">`;
   s += '<g stroke="#eef1f2" stroke-width="1">';
   for (let i = 1; i <= 4; i++) s += `<line x1="0" y1="${topo + (base - topo) * i / 4}" x2="${W}" y2="${topo + (base - topo) * i / 4}"/>`;
   s += "</g>";
-  // rótulo do teto da escala
-  s += `<text x="4" y="${topo - 3}" font-size="9.5" fill="#8a979d">${fmtK(max)}</text>`;
   s += '<g font-size="10" fill="#8a979d" text-anchor="middle">';
-  itens.forEach((it, i) => { s += `<text x="${passo * i + passo / 2}" y="${H - 6}">${esc(it.label)}</text>`; });
+  itens.forEach((it, i) => { s += `<text x="${passo * i + passo / 2}" y="${H - 8}">${esc(it.label)}</text>`; });
   s += "</g>";
-  if (temLy) {
-    s += '<g fill="#dde3e5">';
-    itens.forEach((it, i) => {
-      const h = base - y(it.ly || 0);
-      s += `<rect x="${passo * i + passo * 0.14}" y="${y(it.ly || 0)}" width="${passo * 0.26}" height="${h}" rx="2"/>`;
-    });
-    s += "</g>";
-  }
   s += '<defs><linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#74AFAE"/><stop offset="1" stop-color="#2f7d7c"/></linearGradient></defs>';
-  s += '<g fill="url(#gt)">';
   itens.forEach((it, i) => {
-    if (!(it.fat > 0)) return;
-    const x0 = temLy ? passo * i + passo * 0.44 : passo * i + passo * 0.22;
-    const wB = temLy ? passo * 0.3 : passo * 0.56;
-    s += `<rect x="${x0}" y="${y(it.fat)}" width="${wB}" height="${base - y(it.fat)}" rx="3"><title>${esc(it.label)}: ${fmtM(it.fat)}</title></rect>`;
+    const cx = passo * i + passo / 2;
+    // ano anterior (clara) colada à esquerda da barra atual
+    if (it.ly > 0)
+      s += `<rect x="${cx - wB - 1}" y="${y(it.ly)}" width="${wB}" height="${base - y(it.ly)}" rx="2.5" fill="#dde3e5"><title>${esc(it.label)} ano anterior: ${fmtM(it.ly)}</title></rect>`;
+    if (it.fat > 0)
+      s += `<rect x="${cx + 1}" y="${y(it.fat)}" width="${wB}" height="${base - y(it.fat)}" rx="2.5" fill="url(#gt)"><title>${esc(it.label)}: ${fmtM(it.fat)}</title></rect>`;
+    // valor acima da barra atual
+    if (it.fat > 0)
+      s += `<text x="${cx + 1 + wB / 2}" y="${y(it.fat) - 5}" font-size="9.5" font-weight="700" fill="#182226" text-anchor="middle">${fmtNum(it.fat)}${it.parcial ? "*" : ""}</text>`;
   });
-  s += "</g>";
-  if (temMeta) {
-    const pts = itens.map((it, i) => it.meta > 0 ? `${passo * i + passo / 2},${y(it.meta)}` : null);
-    let seg = [];
-    const segs = [];
-    pts.forEach((p) => { if (p) seg.push(p); else if (seg.length) { segs.push(seg); seg = []; } });
-    if (seg.length) segs.push(seg);
-    for (const sg of segs)
-      s += `<polyline points="${sg.join(" ")}" fill="none" stroke="#C96643" stroke-width="2.2" stroke-dasharray="6 5" stroke-linecap="round"/>`;
+  // linha da meta (pula meses sem meta) + valores
+  const pts = itens.map((it, i) => it.meta > 0 ? { x: passo * i + passo / 2, y: y(it.meta), v: it.meta } : null);
+  let seg = []; const segs = [];
+  pts.forEach((p) => { if (p) seg.push(p); else if (seg.length) { segs.push(seg); seg = []; } });
+  if (seg.length) segs.push(seg);
+  for (const sg of segs) {
+    s += `<polyline points="${sg.map((p) => p.x + "," + p.y).join(" ")}" fill="none" stroke="#C96643" stroke-width="2.2" stroke-dasharray="6 5" stroke-linecap="round"/>`;
+    for (const p of sg)
+      s += `<circle cx="${p.x}" cy="${p.y}" r="2.6" fill="#C96643"/>` +
+           `<text x="${p.x}" y="${p.y - 7}" font-size="8.5" fill="#C96643" text-anchor="middle">${fmtNum(p.v)}</text>`;
   }
   return s + "</svg>";
 }
 
+/* ---------- semáforo / famílias ---------- */
 const ST = {
   ok: { pill: "p-ok", nome: "Comprou no mês" },
   atencao: { pill: "p-warn", nome: "Atenção · 1 mês" },
@@ -312,7 +355,7 @@ const ST = {
 function renderSemaforo(rows) {
   const c = { ok: 0, atencao: 0, validar: 0, acionar: 0 };
   let risco = 0;
-  for (const p of rows) { c[p.status] = (c[p.status] || 0) + 1; risco += p.perdido_estim || 0; }
+  for (const p of rows) { c[p.status]++; risco += p.perdido || 0; }
   const tot = rows.length || 1;
   $("semaforo").innerHTML = ["ok", "atencao", "validar", "acionar"].map((st) =>
     `<tr><td><span class="pill ${ST[st].pill}">${ST[st].nome}</span></td>
@@ -324,62 +367,84 @@ function renderSemaforo(rows) {
 }
 
 function renderFamilias() {
-  const fams = (S.data.rankings.familias || []).slice(0, 3);
-  $("familias-mini").innerHTML = fams.map((f, i) =>
+  $("familias-mini").innerHTML = (S.data.familias || []).slice(0, 3).map((f, i) =>
     `<li><span class="n">${i + 1}</span><span class="nm">${esc(f.nome)}</span><span class="vl">${fmtM(f.fat)}</span></li>`).join("");
 }
 
 /* ---------- Metas ---------- */
+function agrupar(rows, campo, meses) {
+  const g = {};
+  for (const p of rows) {
+    const k = p[campo] || "SEM CADASTRO";
+    const o = (g[k] ??= { nome: k, meta: 0, realizado: 0, ly: 0, clientes: 0, positivados: 0 });
+    for (const m of meses) {
+      o.meta += p.meta[m - 1] || 0;
+      const a = serie(p, S.ano); if (a) o.realizado += a[m - 1] || 0;
+      const b = serie(p, S.ano - 1); if (b) o.ly += b[m - 1] || 0;
+    }
+    o.clientes++; if (p.status === "ok") o.positivados++;
+  }
+  return Object.values(g).map((o) => (o.ating = o.meta ? o.realizado / o.meta : null, o))
+    .sort((a, b) => b.realizado - a.realizado);
+}
+
 function linhaMetaTabela(o) {
   const at = o.ating;
-  const pct = at == null ? "—" : fmtPct(at, 0);
   const cor = at == null ? "var(--soft)" : at >= 1 ? "var(--ok)" : at >= 0.9 ? "var(--txt)" : at >= 0.8 ? "var(--warn)" : "var(--bad)";
   const cls = at == null ? "" : at >= 0.9 ? "" : at >= 0.8 ? "gold" : "red";
   const w = at == null ? 0 : Math.min(100, at * 100);
-  const gap = o.meta_ytd ? o.realizado - o.meta_ytd : null;
+  const gap = o.meta ? o.realizado - o.meta : null;
   return `<tr><td><b>${esc(nomeVend(o.nome))}</b></td>
-    <td class="r">${fmtM(o.meta_ytd)}</td><td class="r">${fmtM(o.realizado)}</td>
+    <td class="r">${o.meta ? fmtM(o.meta) : "—"}</td><td class="r">${fmtM(o.realizado)}</td>
     <td><div class="bar"><i class="${cls}" style="width:${w}%"></i></div></td>
-    <td class="r" style="color:${cor}"><b>${pct}</b></td>
+    <td class="r" style="color:${cor}"><b>${at == null ? "—" : fmtPct(at, 0)}</b></td>
     <td class="r" style="color:${gap == null ? "var(--soft)" : gap >= 0 ? "var(--ok)" : "var(--bad)"}">${gap == null ? "—" : (gap >= 0 ? "+" : "−") + fmtM(Math.abs(gap))}</td></tr>`;
 }
 
-function renderMetas(rows) {
+function renderMetas(rows, meses) {
   const d = S.data;
-  // nível 1: gerentes (gestor sem filtro) ou vendedores
   let titulo, grupos;
   if (d.escopo.perfil === "gestor" && !S.fGer && !S.fVend) {
-    titulo = "Por gerente — YTD " + d.periodo.ano; grupos = agrupar(rows, "ger");
+    titulo = `Por gerente — ${rotuloPer()} ${S.ano}`; grupos = agrupar(rows, "ger", meses);
   } else if (d.escopo.perfil !== "vendedor" && !S.fVend) {
-    titulo = "Por vendedor — YTD " + d.periodo.ano; grupos = agrupar(rows, "vend");
+    titulo = `Por vendedor — ${rotuloPer()} ${S.ano}`; grupos = agrupar(rows, "vend", meses);
   } else {
-    titulo = "Por cliente — YTD " + d.periodo.ano;
-    grupos = rows.filter((p) => p.meta_ano > 0 || p.fat_ytd !== 0)
-      .map((p) => ({ nome: p.cliente, meta_ytd: p.meta_ytd, realizado: p.fat_ytd, ating: p.meta_ytd ? p.fat_ytd / p.meta_ytd : null }))
-      .sort((a, b) => b.realizado - a.realizado).slice(0, 60);
+    titulo = `Por cliente — ${rotuloPer()} ${S.ano}`;
+    grupos = agrupar(rows, "cliente", meses).slice(0, 60);
   }
   $("metas-n1-titulo").textContent = titulo;
   $("metas-n1").innerHTML = grupos.map(linhaMetaTabela).join("") || '<tr><td colspan="6" class="empty">Sem dados.</td></tr>';
 
-  // maiores gaps por cliente
   const busca = S.buscaMeta.toLowerCase();
-  let cli = rows.filter((p) => p.meta_ytd > 0);
+  let cli = rows.map((p) => {
+    let meta = 0, real = 0;
+    for (const m of meses) { meta += p.meta[m - 1] || 0; const a = serie(p, S.ano); if (a) real += a[m - 1] || 0; }
+    return { ...p, metaP: meta, realP: real, gap: real - meta };
+  }).filter((p) => p.metaP > 0);
   if (busca) cli = cli.filter((p) => p.cliente.toLowerCase().includes(busca));
-  const gaps = cli.map((p) => ({ ...p, gap: p.fat_ytd - p.meta_ytd })).sort((a, b) => a.gap - b.gap);
-  $("metas-gaps").innerHTML = gaps.slice(0, S.nCli).map((p) => {
-    const at = p.meta_ytd ? p.fat_ytd / p.meta_ytd : null;
+  cli.sort((a, b) => a.gap - b.gap);
+  $("metas-gaps").innerHTML = cli.slice(0, S.nCli).map((p) => {
+    const at = p.metaP ? p.realP / p.metaP : null;
     return `<tr><td><b>${esc(p.cliente)}</b></td><td>${esc(nomeVend(p.vend))}</td>
-      <td class="r">${fmtM(p.meta_ytd)}</td><td class="r">${fmtM(p.fat_ytd)}</td>
+      <td class="r">${fmtM(p.metaP)}</td><td class="r">${fmtM(p.realP)}</td>
       <td class="r" style="color:${at >= 1 ? "var(--ok)" : at >= 0.8 ? "var(--warn)" : "var(--bad)"}"><b>${fmtPct(at, 0)}</b></td>
       <td class="r" style="color:${p.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${(p.gap >= 0 ? "+" : "−") + fmtM(Math.abs(p.gap))}</td></tr>`;
-  }).join("") || '<tr><td colspan="6" class="empty">Nenhum cliente com meta no filtro atual.</td></tr>';
-  $("metas-mais").style.display = gaps.length > S.nCli ? "" : "none";
+  }).join("") || '<tr><td colspan="6" class="empty">Nenhum cliente com meta na seleção.</td></tr>';
+  $("metas-mais").style.display = cli.length > S.nCli ? "" : "none";
 }
 
-/* ---------- Positivados ---------- */
-function sparkHtml(hist) {
-  const max = Math.max(1, ...hist);
-  return '<div class="spark">' + hist.map((v) =>
+/* ---------- Positivados (recência = foto atual; não muda com o período) ---------- */
+function sparkHtml(p) {
+  const { ano, mes_atual } = S.data.periodo;
+  const vals = [];
+  for (let k = 6; k >= 0; k--) {
+    const idx = ano * 12 + mes_atual - 1 - k;
+    const y = Math.floor(idx / 12), m = (idx % 12) + 1;
+    const a = serie(p, y);
+    vals.push(a ? Math.max(0, a[m - 1] || 0) : 0);
+  }
+  const max = Math.max(1, ...vals);
+  return '<div class="spark">' + vals.map((v) =>
     v > 0 ? `<i style="height:${Math.max(4, Math.round((v / max) * 26))}px"></i>` : '<i class="z"></i>').join("") + "</div>";
 }
 
@@ -388,8 +453,8 @@ function renderPositivados(rows) {
   const busca = S.busca.toLowerCase();
   let r = rows;
   if (S.fStatus) r = r.filter((p) => p.status === S.fStatus);
-  if (busca) r = r.filter((p) => p.cliente.toLowerCase().includes(busca) || (p.cnpj || "").includes(busca));
-  r = [...r].sort((a, b) => (b.perdido_estim || 0) - (a.perdido_estim || 0) || b.fat_ytd - a.fat_ytd);
+  if (busca) r = r.filter((p) => p.cliente.toLowerCase().includes(busca));
+  r = [...r].sort((a, b) => (b.perdido || 0) - (a.perdido || 0) || sum26(b) - sum26(a));
 
   const mostraVend = d.escopo.perfil !== "vendedor";
   $("pos-head").innerHTML = `<tr><th>Cliente</th>${mostraVend ? "<th>Vendedor</th>" : ""}<th>Últ. compra</th>
@@ -397,43 +462,45 @@ function renderPositivados(rows) {
   $("pos-body").innerHTML = r.slice(0, S.nPos).map((p) => {
     const st = ST[p.status] || ST.acionar;
     const stTxt = p.status === "acionar" && p.meses_sem < 99 ? `Acionar agora · ${p.meses_sem} meses` : st.nome;
-    return `<tr><td><b>${esc(p.cliente)}</b><span style="display:block;font-size:10.5px;color:var(--soft)">${esc(p.uf)}</span></td>
+    const subs = [p.uf, p.cnpjs > 1 ? `${p.cnpjs} CNPJs` : ""].filter(Boolean).join(" · ");
+    return `<tr><td><b>${esc(p.cliente)}</b><span style="display:block;font-size:10.5px;color:var(--soft)">${esc(subs)}</span></td>
       ${mostraVend ? `<td>${esc(nomeVend(p.vend))}</td>` : ""}
-      <td>${fmtData(p.ult_compra)}</td><td>${sparkHtml(p.hist)}</td>
-      <td class="r">${fmtM(p.media_mensal)}</td>
-      <td class="r">${p.perdido_estim > 0 ? `<b style="color:var(--bad)">${fmtM(p.perdido_estim)}</b>` : '<span style="color:var(--soft)">—</span>'}</td>
+      <td>${fmtData(p.ult)}</td><td>${sparkHtml(p)}</td>
+      <td class="r">${fmtM(p.media)}</td>
+      <td class="r">${p.perdido > 0 ? `<b style="color:var(--bad)">${fmtM(p.perdido)}</b>` : '<span style="color:var(--soft)">—</span>'}</td>
       <td><span class="pill ${st.pill}">${stTxt}</span></td></tr>`;
   }).join("") || `<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>`;
   $("pos-mais").style.display = r.length > S.nPos ? "" : "none";
   $("pos-info").textContent = `${fmtBR(Math.min(S.nPos, r.length))} de ${fmtBR(r.length)} clientes`;
 }
+const sum26 = (p) => p.m26.reduce((s, v) => s + v, 0);
 
 /* ---------- Rankings ---------- */
 function liRank(i, nome, sub, valor) {
   return `<li><span class="n">${i + 1}</span><span class="nm">${esc(nome)}${sub ? `<span class="sb">${esc(sub)}</span>` : ""}</span><span class="vl">${valor}</span></li>`;
 }
 
-function renderRankings(rows) {
+function renderRankings(rows, meses) {
   const d = S.data;
-  // vendedores
   if (d.escopo.perfil !== "vendedor") {
-    const v = agrupar(rows, "vend").slice(0, 10);
-    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, nomeVend(o.nome), null, fmtM(o.realizado))).join("") || '<li class="empty">—</li>';
+    const v = agrupar(rows, "vend", meses).slice(0, 10);
+    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, nomeVend(o.nome), null, fmtM(o.realizado))).join("");
     $("rk-vend-card").style.display = "";
   } else $("rk-vend-card").style.display = "none";
-  // gerentes (só gestor, sem filtro de gerente)
   if (d.escopo.perfil === "gestor" && !S.fGer) {
-    const g = agrupar(rows, "ger").slice(0, 10);
+    const g = agrupar(rows, "ger", meses).slice(0, 10);
     $("rk-ger").innerHTML = g.map((o, i) => liRank(i, o.nome, null, fmtM(o.realizado))).join("");
     $("rk-ger-card").style.display = "";
   } else $("rk-ger-card").style.display = "none";
-  // clientes
-  const c = [...rows].sort((a, b) => b.fat_ytd - a.fat_ytd).slice(0, 10);
-  $("rk-cli").innerHTML = c.map((p, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtM(p.fat_ytd))).join("");
-  // famílias (escopo total)
-  const f = (d.rankings.familias || []).slice(0, 10);
-  $("rk-fam").innerHTML = f.map((o, i) => liRank(i, o.nome, null, fmtM(o.fat))).join("");
-  $("rk-fam-nota").style.display = filtrado() ? "" : "none";
+  const c = rows.map((p) => {
+    let f = 0; const a = serie(p, S.ano);
+    if (a) for (const m of meses) f += a[m - 1] || 0;
+    return { p, f };
+  }).sort((x, y) => y.f - x.f).slice(0, 10);
+  $("rk-cli").innerHTML = c.map(({ p, f }, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtM(f))).join("");
+  const fm = (d.familias || []).slice(0, 10);
+  $("rk-fam").innerHTML = fm.map((o, i) => liRank(i, o.nome, null, fmtM(o.fat))).join("");
+  $("rk-fam-nota").style.display = (filtrado() || S.per !== "ytd" || S.ano !== 2026) ? "" : "none";
 }
 
 /* ---------------- navegação e eventos ---------------- */
@@ -447,23 +514,26 @@ document.addEventListener("DOMContentLoaded", () => {
   $("pw").addEventListener("keydown", (e) => { if (e.key === "Enter") entrar(); });
   $("lbtn").addEventListener("click", entrar);
   document.querySelectorAll(".nav-i[data-v]").forEach((el) => el.addEventListener("click", () => trocarView(el.dataset.v)));
-  $("f-ger")?.addEventListener("change", onFiltro);
-  $("f-vend")?.addEventListener("change", onFiltro);
-  $("btn-reset").addEventListener("click", resetar);
+  ["f-ger", "f-vend", "f-ano", "f-per"].forEach((id) => $(id)?.addEventListener("change", onFiltro));
+  $("btn-reset").addEventListener("click", limparFiltros);
   $("who-sair").addEventListener("click", sair);
   $("btn-atualizar").addEventListener("click", () =>
-    alert("Atualização automática entra na próxima fase.\nPor enquanto os dados são republicados pelo gestor."));
+    alert("Atualização automática entra na próxima fase.\nPor enquanto os dados são republicados pelo administrador."));
   $("busca-pos").addEventListener("input", (e) => { S.busca = e.target.value; S.nPos = 100; renderPositivados(linhas()); });
-  $("busca-meta").addEventListener("input", (e) => { S.buscaMeta = e.target.value; S.nCli = 50; renderMetas(linhas()); });
+  $("busca-meta").addEventListener("input", (e) => { S.buscaMeta = e.target.value; S.nCli = 50; renderMetas(linhas(), mesesSel()); });
   $("pos-mais").addEventListener("click", () => { S.nPos += 200; renderPositivados(linhas()); });
-  $("metas-mais").addEventListener("click", () => { S.nCli += 100; renderMetas(linhas()); });
+  $("metas-mais").addEventListener("click", () => { S.nCli += 100; renderMetas(linhas(), mesesSel()); });
   document.querySelectorAll(".fchip[data-st]").forEach((el) => el.addEventListener("click", () => {
     S.fStatus = S.fStatus === el.dataset.st ? "" : el.dataset.st;
     document.querySelectorAll(".fchip[data-st]").forEach((x) => x.classList.toggle("on", x.dataset.st === S.fStatus));
     S.nPos = 100; renderPositivados(linhas());
   }));
 
-  // sessão anterior nesta aba
   const salvo = sessionStorage.getItem("bv_dados");
-  if (salvo) { try { S.data = JSON.parse(salvo); boot(); } catch { sessionStorage.removeItem("bv_dados"); } }
+  if (salvo) {
+    try {
+      const d = JSON.parse(salvo);
+      if (d.schema === 2) { S.data = d; boot(); } else sessionStorage.removeItem("bv_dados");
+    } catch { sessionStorage.removeItem("bv_dados"); }
+  }
 });

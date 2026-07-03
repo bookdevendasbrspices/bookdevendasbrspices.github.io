@@ -1,26 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-Radar BR Spices — ETL de exportação (Fase 1)
-=============================================
+Book de Vendas BR Spices — ETL de exportação (schema 2)
+========================================================
 Lê as fontes da BASE PROTHEUS (xlsx), aplica as regras de negócio do Book de
-Vendas e gera JSONs agregados POR PERFIL (gestor / gerente / vendedor),
+Vendas e gera JSONs POR PERFIL (visão completa / gerente / vendedor),
 criptografados com AES-GCM (compatível com WebCrypto do navegador).
 
-Regras de negócio (validadas contra o Book de Vendas / PBI em 02/07/2026):
-  - Venda = linhas TIPO "1-Venda" (bonificação/doação/outros ficam de fora)
-  - Excluir funcionários: ID_CLIENTE começando com "4" ou "5" (texto)
-  - Excluir famílias: MAQUINA, SACOS, USO E CONSUMO
-  - Fat líquido = venda - devolução (devolução vem positiva no arquivo)
-  - Carteira = pedidos com Atendido = 0 (snapshot)
-  - Metas por CNPJ: Ajustes_Metas_CNPJ.xlsx, aba CNPJ_METAS, cabeçalho na linha 3
-  - Hierarquia: GR_BRS (gerente) > VEND_BRS (vendedor), via CNPJ
+Regras de negócio (validadas contra o Book/PBI em 02/07/2026):
+  - Venda = linhas TIPO "1-Venda"; excluir funcionários (ID_CLIENTE inicia 4/5)
+    e famílias MAQUINA/SACOS/USO E CONSUMO; líquido = venda - devolução.
+  - Metas por CNPJ: Ajustes_Metas_CNPJ.xlsx aba CNPJ_METAS, cabeçalho linha 3.
+  - Hierarquia: GR_BRS (gerente) > VEND_BRS (vendedor).
 
-Saída:
-  - data/<hash>.enc.json  (um por perfil; nome do arquivo = sha256(senha)[:16],
-    então o site acha o arquivo a partir da senha, sem manifest aberto)
-  - tools/senhas.local.json + tools/senhas.local.txt  (NUNCA commitados)
+Schema 2 (03/07/2026):
+  - Cliente = CLIENTE - BANDEIRA agregado por vendedor (não CNPJ) — pedido do
+    Fernando (ex.: FORT/MS loja-a-loja vira 1 linha).
+  - Séries MENSAIS por cliente: m24/m25/m26 (fat líquido), q26 (caixas líq.),
+    meta (12 meses) → o app calcula YTD/mês/quarter e ano anterior no período.
+  - meta_empresa_mensal: jan-jun = soma das metas por CNPJ; jul-dez = metas
+    totais da empresa (METAS_EMPRESA_S2) até o Fernando preencher a planilha.
 
-Uso:  python tools/export_radar.py
+Saída: data/<sha256(senha)[:16]>.enc.json por perfil; senhas persistem em
+tools/senhas.local.json|txt (NUNCA commitados).
+Uso: python tools/export_radar.py
 """
 import base64
 import hashlib
@@ -45,6 +47,15 @@ SENHAS_JSON = os.path.join(TOOLS_DIR, "senhas.local.json")
 SENHAS_TXT = os.path.join(TOOLS_DIR, "senhas.local.txt")
 
 FAM_EXCLUIDAS = {"MAQUINA", "SACOS", "USO E CONSUMO"}
+ANO_MIN = 2024              # 2024 entra p/ o "ano anterior" do gráfico de 12 meses
+PBKDF2_ITER = 310_000
+COLS_MES_META = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN",
+                 "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
+
+# Metas totais da empresa jul-dez/2026 (informadas pelo Fernando em 03/07/2026;
+# quando as metas por gerente/vendedor entrarem na planilha, elas assumem)
+METAS_EMPRESA_S2 = {7: 15_200_000, 8: 15_400_000, 9: 16_500_000,
+                    10: 17_000_000, 11: 17_500_000, 12: 14_200_000}
 
 # Acessos de visão completa (nome, cargo exibido, e-mail de referência)
 ACESSO_TOTAL = [
@@ -52,53 +63,42 @@ ACESSO_TOTAL = [
     ("RICARDO GOBATTO", "DIRETOR COMERCIAL", "rgobatto@brspices.com.br"),
     ("GABRIEL DANIEL", "CEO", "gabriel@brspices.com.br"),
 ]
-ANOS_MINIMO = 2025          # v1 usa 2025 (comparativo) + 2026
-PBKDF2_ITER = 310_000
-MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
-            "jul", "ago", "set", "out", "nov", "dez"]
-COLS_MES_META = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN",
-                 "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
 
 norm_cnpj = lambda s: re.sub(r"\D", "", str(s or ""))
 
 
 def eh_funcionario(df):
-    """Funcionários: ID_CLIENTE (texto, com zeros à esquerda) começa com 4 ou 5."""
     return df["ID_CLIENTE"].fillna("").astype(str).str.strip().str.startswith(("4", "5"))
 
 
 # ---------------------------------------------------------------- leitura
 def ler_faturamento():
-    """Lê todos os xlsx da pasta @faturamento (exceto anos antigos e temporários)."""
     pasta = os.path.join(BASE, "@faturamento")
     frames = []
     for nome in sorted(os.listdir(pasta)):
         if not nome.lower().endswith(".xlsx") or nome.startswith("~$"):
             continue
         m = re.search(r"@fat_(\d{4})", nome)
-        if m and int(m.group(1)) < ANOS_MINIMO:
-            continue  # 2022-2024 não entram na v1
-        caminho = os.path.join(pasta, nome)
+        if m and int(m.group(1)) < ANO_MIN:
+            continue
         print(f"  lendo {nome} ...")
-        df = pd.read_excel(caminho, sheet_name=0,
+        df = pd.read_excel(os.path.join(pasta, nome), sheet_name=0,
                            dtype={"ID_CLIENTE": str, "CNPJ": str,
                                   "ID_VENDEDOR": str, "ID_GERENTE": str})
-        df = df[["NF", "CNPJ", "EMISSAO", "TIPO", "ID_CLIENTE", "NOME CLIENTE",
-                 "ESTADO", "CIDADE", "ID_VENDEDOR", "NOME VENDEDOR",
-                 "NOME GERENTE", "ID_PRODUTO", "NOME PRODUTO", "NOME FAMILIA",
-                 "QUANTIDADE", "TOTAL"]].copy()
-        df["ARQUIVO"] = nome
+        df = df[["CNPJ", "EMISSAO", "TIPO", "ID_CLIENTE", "NOME CLIENTE",
+                 "ESTADO", "NOME FAMILIA", "QUANTIDADE", "TOTAL"]].copy()
         frames.append(df)
     fat = pd.concat(frames, ignore_index=True)
     fat["EMISSAO"] = pd.to_datetime(fat["EMISSAO"], errors="coerce")
-    fat = fat[fat["EMISSAO"].dt.year >= ANOS_MINIMO]
-    # regras do Book
+    fat = fat[fat["EMISSAO"].dt.year >= ANO_MIN]
     fat = fat[fat["TIPO"] == "1-Venda"]
     fat = fat[~eh_funcionario(fat)]
     fat = fat[~fat["NOME FAMILIA"].isin(FAM_EXCLUIDAS)]
     fat["CNPJ_N"] = fat["CNPJ"].map(norm_cnpj)
     fat["TOTAL"] = pd.to_numeric(fat["TOTAL"], errors="coerce").fillna(0.0)
     fat["QUANTIDADE"] = pd.to_numeric(fat["QUANTIDADE"], errors="coerce").fillna(0.0)
+    fat["ANO"] = fat["EMISSAO"].dt.year
+    fat["MES"] = fat["EMISSAO"].dt.month
     return fat
 
 
@@ -106,11 +106,13 @@ def ler_devolucao():
     df = pd.read_excel(os.path.join(BASE, "@devolução", "@devolução.xlsx"),
                        sheet_name=0, dtype={"ID_CLIENTE": str, "CNPJ": str})
     df["EMISSAO"] = pd.to_datetime(df["EMISSAO"], errors="coerce")
-    df = df[df["EMISSAO"].dt.year >= ANOS_MINIMO]
+    df = df[df["EMISSAO"].dt.year >= ANO_MIN]
     df = df[~eh_funcionario(df)]
     df["CNPJ_N"] = df["CNPJ"].map(norm_cnpj)
     df["TOTAL"] = pd.to_numeric(df["TOTAL"], errors="coerce").fillna(0.0)
     df["QUANTIDADE"] = pd.to_numeric(df["QUANTIDADE"], errors="coerce").fillna(0.0)
+    df["ANO"] = df["EMISSAO"].dt.year
+    df["MES"] = df["EMISSAO"].dt.month
     return df
 
 
@@ -130,11 +132,8 @@ def ler_metas():
     df["CNPJ_N"] = df["CNPJ"].map(norm_cnpj)
     df = df[df["CNPJ_N"] != ""]
     df = df.drop_duplicates(subset="CNPJ_N", keep="first")
-    for c in COLS_MES_META + [2026, "2026"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
-    col_total = 2026 if 2026 in df.columns else "2026"
-    df = df.rename(columns={col_total: "META_ANO"})
+    for c in COLS_MES_META:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
     for col in ["CLIENTE - BANDEIRA", "NOME CLIENTE PROTHEUS", "VEND_BRS", "GR_BRS", "ESTADO"]:
         df[col] = df[col].fillna("").astype(str).str.strip()
     return df
@@ -142,7 +141,6 @@ def ler_metas():
 
 # ---------------------------------------------------------------- criptografia
 def criptografar(obj, senha):
-    """AES-GCM 256 + PBKDF2-SHA256 — decriptável com WebCrypto no navegador."""
     salt = secrets.token_bytes(16)
     iv = secrets.token_bytes(12)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt,
@@ -161,195 +159,14 @@ def nome_arquivo(senha):
 
 
 def gerar_senha():
-    alfa = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sem 0/O/1/I (legibilidade)
-    blocos = ["".join(secrets.choice(alfa) for _ in range(4)) for _ in range(3)]
-    return "RADAR-" + "-".join(blocos)
-
-
-# ---------------------------------------------------------------- agregação
-def _round(d, nd=2):
-    return {k: (round(v, nd) if isinstance(v, float) else v) for k, v in d.items()}
-
-
-def montar_json(escopo_perfil, escopo_nome, cnpjs, ctx, extra=None):
-    """Monta o JSON de dados para um escopo (conjunto de CNPJs visíveis)."""
-    fat, dev, cart, metas = ctx["fat"], ctx["dev"], ctx["cart"], ctx["metas"]
-    hoje = ctx["hoje"]
-    ano, mes_atual = ctx["ano_atual"], ctx["mes_atual"]
-    corte_ly = ctx["corte_ly"]
-
-    f = fat[fat["CNPJ_N"].isin(cnpjs)]
-    d = dev[dev["CNPJ_N"].isin(cnpjs)]
-    c = cart[cart["CNPJ_N"].isin(cnpjs)]
-    m = metas[metas["CNPJ_N"].isin(cnpjs)]
-
-    f_ano = f[f["EMISSAO"].dt.year == ano]
-    d_ano = d[d["EMISSAO"].dt.year == ano]
-    f_ly = f[f["EMISSAO"].dt.year == ano - 1]
-    d_ly = d[d["EMISSAO"].dt.year == ano - 1]
-    f_ly_mp = f_ly[f_ly["EMISSAO"] <= corte_ly]
-    d_ly_mp = d_ly[d_ly["EMISSAO"] <= corte_ly]
-
-    fat_liq = f_ano["TOTAL"].sum() - d_ano["TOTAL"].sum()
-    fat_liq_ly_mp = f_ly_mp["TOTAL"].sum() - d_ly_mp["TOTAL"].sum()
-    qtd_liq = f_ano["QUANTIDADE"].sum() - d_ano["QUANTIDADE"].sum()
-    meta_ano = m["META_ANO"].sum()
-    meta_ytd = sum(m[COLS_MES_META[i]].sum() for i in range(mes_atual))
-    carteira = c["TOTAL"].sum()
-    devolucao = d_ano["TOTAL"].sum()
-
-    # por cliente/mês (base p/ positivados, metas e rankings)
-    f_ano_g = f_ano.groupby(["CNPJ_N", f_ano["EMISSAO"].dt.month])["TOTAL"].sum()
-    d_ano_g = d_ano.groupby(["CNPJ_N", d_ano["EMISSAO"].dt.month])["TOTAL"].sum()
-    liq_cli_mes = f_ano_g.sub(d_ano_g, fill_value=0.0)  # (cnpj, mes) -> líquido
-    liq_cli = liq_cli_mes.groupby(level=0).sum()
-    liq_cli_ly = (f_ly.groupby("CNPJ_N")["TOTAL"].sum()
-                  .sub(d_ly.groupby("CNPJ_N")["TOTAL"].sum(), fill_value=0.0))
-
-    # dimensão de cliente: metas + clientes sem cadastro que faturaram
-    dim = m.set_index("CNPJ_N")
-    nomes_fat = (f.sort_values("EMISSAO").groupby("CNPJ_N")
-                 [["NOME CLIENTE", "NOME VENDEDOR", "NOME GERENTE", "ESTADO"]].last())
-
-    def info_cliente(cnpj):
-        if cnpj in dim.index:
-            r = dim.loc[cnpj]
-            return (r["CLIENTE - BANDEIRA"] or r["NOME CLIENTE PROTHEUS"],
-                    r["VEND_BRS"], r["GR_BRS"], r["ESTADO"], float(r["META_ANO"]),
-                    float(sum(r[COLS_MES_META[i]] for i in range(mes_atual))))
-        if cnpj in nomes_fat.index:
-            r = nomes_fat.loc[cnpj]
-            return (str(r["NOME CLIENTE"]), "SEM CADASTRO", "SEM CADASTRO",
-                    str(r["ESTADO"]), 0.0, 0.0)
-        return ("(desconhecido)", "SEM CADASTRO", "SEM CADASTRO", "", 0.0, 0.0)
-
-    ult_compra = f.groupby("CNPJ_N")["EMISSAO"].max()
-
-    # ---- positivados / semáforo de recência
-    positivados = []
-    universo = set(m["CNPJ_N"]) | set(liq_cli.index)
-    idx_atual = ano * 12 + mes_atual
-    for cnpj in universo:
-        nome, vend, ger, uf, meta_a, meta_y = info_cliente(cnpj)
-        fat_ytd_c = float(liq_cli.get(cnpj, 0.0))
-        uc = ult_compra.get(cnpj)
-        if pd.isna(uc) if uc is not None else True:
-            uc = None
-        if uc is None and fat_ytd_c == 0 and meta_a == 0:
-            continue  # sem venda 25/26 e sem meta: fora do radar
-        if uc is not None:
-            meses_sem = idx_atual - (uc.year * 12 + uc.month)
-        else:
-            meses_sem = 99
-        status = ("ok" if meses_sem <= 0 else
-                  "atencao" if meses_sem == 1 else
-                  "validar" if meses_sem == 2 else "acionar")
-        # histórico dos últimos 7 meses (mês atual incluso)
-        hist = []
-        for k in range(6, -1, -1):
-            idx = idx_atual - k
-            a, mm = divmod(idx - 1, 12)
-            hist.append(round(float(liq_cli_mes.get((cnpj, mm + 1), 0.0))
-                              if a == ano else 0.0, 2))
-        meses_ativos = int((liq_cli_mes.loc[cnpj] != 0).sum()) if cnpj in liq_cli.index else 0
-        media = fat_ytd_c / meses_ativos if meses_ativos else 0.0
-        positivados.append(_round({
-            "cliente": nome, "cnpj": cnpj, "uf": uf, "vend": vend, "ger": ger,
-            "ult_compra": uc.strftime("%Y-%m-%d") if uc is not None else None,
-            "meses_sem": int(meses_sem), "status": status, "hist": hist,
-            "fat_ytd": fat_ytd_c, "fat_ly": float(liq_cli_ly.get(cnpj, 0.0)),
-            "media_mensal": media,
-            "perdido_estim": media * meses_sem if meses_sem >= 1 and media > 0 else 0.0,
-            "meta_ano": meta_a, "meta_ytd": meta_y,
-        }))
-    positivados.sort(key=lambda x: -(x["perdido_estim"] or 0))
-
-    positivados_mes = sum(1 for p in positivados if p["status"] == "ok")
-    clientes_base = sum(1 for p in positivados if p["meta_ano"] > 0 or p["fat_ytd"] != 0)
-
-    # ---- evolução mensal (ano atual + ano anterior + meta)
-    liq_mes = (f_ano.groupby(f_ano["EMISSAO"].dt.month)["TOTAL"].sum()
-               .sub(d_ano.groupby(d_ano["EMISSAO"].dt.month)["TOTAL"].sum(), fill_value=0.0))
-    liq_mes_ly = (f_ly.groupby(f_ly["EMISSAO"].dt.month)["TOTAL"].sum()
-                  .sub(d_ly.groupby(d_ly["EMISSAO"].dt.month)["TOTAL"].sum(), fill_value=0.0))
-    evolucao = [_round({"mes": MESES_PT[i], "num": i + 1,
-                        "fat": float(liq_mes.get(i + 1, 0.0)),
-                        "fat_ly": float(liq_mes_ly.get(i + 1, 0.0)),
-                        "meta": float(m[COLS_MES_META[i]].sum())})
-                for i in range(12)]
-
-    # ---- metas vs realizado e rankings por dimensão
-    def agrupar(nivel):
-        grupos = {}
-        for p in positivados:
-            chave = p[nivel] or "SEM CADASTRO"
-            g = grupos.setdefault(chave, {"nome": chave, "meta_ytd": 0.0,
-                                          "meta_ano": 0.0, "realizado": 0.0,
-                                          "realizado_ly": 0.0, "clientes": 0,
-                                          "positivados": 0})
-            g["meta_ytd"] += p["meta_ytd"]; g["meta_ano"] += p["meta_ano"]
-            g["realizado"] += p["fat_ytd"]; g["realizado_ly"] += p["fat_ly"]
-            g["clientes"] += 1
-            g["positivados"] += 1 if p["status"] == "ok" else 0
-        out = []
-        for g in grupos.values():
-            g["ating"] = round(g["realizado"] / g["meta_ytd"], 4) if g["meta_ytd"] else None
-            out.append(_round(g))
-        out.sort(key=lambda x: -x["realizado"])
-        return out
-
-    metas_bloco = {"por_cliente": [
-        _round({"cliente": p["cliente"], "cnpj": p["cnpj"], "vend": p["vend"],
-                "ger": p["ger"], "meta_ytd": p["meta_ytd"], "meta_ano": p["meta_ano"],
-                "realizado": p["fat_ytd"],
-                "ating": round(p["fat_ytd"] / p["meta_ytd"], 4) if p["meta_ytd"] else None})
-        for p in sorted(positivados, key=lambda x: -x["meta_ano"])]}
-    rankings = {"clientes": [
-        _round({"nome": p["cliente"], "vend": p["vend"], "ger": p["ger"],
-                "fat": p["fat_ytd"], "fat_ly": p["fat_ly"]})
-        for p in sorted(positivados, key=lambda x: -x["fat_ytd"])[:100]]}
-    if escopo_perfil in ("gestor", "gerente"):
-        metas_bloco["por_vendedor"] = agrupar("vend")
-        rankings["vendedores"] = agrupar("vend")
-    if escopo_perfil == "gestor":
-        metas_bloco["por_gerente"] = agrupar("ger")
-        rankings["gerentes"] = agrupar("ger")
-
-    fam = (f_ano.groupby("NOME FAMILIA")["TOTAL"].sum().sort_values(ascending=False))
-    rankings["familias"] = [_round({"nome": k, "fat": float(v)})
-                            for k, v in fam.head(20).items()]
-
-    return {
-        "gerado_em": hoje.strftime("%Y-%m-%d %H:%M"),
-        "atualizado_ate": ctx["max_emissao"].strftime("%Y-%m-%d"),
-        "escopo": {"perfil": escopo_perfil, "nome": escopo_nome, **(extra or {})},
-        "periodo": {"ano": ano, "mes_atual": mes_atual,
-                    "mes_atual_nome": MESES_PT[mes_atual - 1]},
-        "kpis": _round({
-            "fat_liq_ytd": float(fat_liq), "fat_liq_ly_mp": float(fat_liq_ly_mp),
-            "cresc_ytd": round((fat_liq - fat_liq_ly_mp) / fat_liq_ly_mp, 4)
-                         if fat_liq_ly_mp > 0 else None,
-            "qtd_liq_ytd": float(qtd_liq), "meta_ytd": float(meta_ytd),
-            "meta_ano": float(meta_ano),
-            "ating_ytd": round(fat_liq / meta_ytd, 4) if meta_ytd else None,
-            "carteira": float(carteira), "devolucao": float(devolucao),
-            "clientes_base": clientes_base, "positivados_mes": positivados_mes,
-            "taxa_positivacao": round(positivados_mes / clientes_base, 4)
-                                if clientes_base else None,
-            "ticket": round(fat_liq / clientes_base, 2) if clientes_base else None,
-        }),
-        "evolucao": evolucao,
-        "metas": metas_bloco,
-        "positivados": positivados,
-        "rankings": rankings,
-    }
+    alfa = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "RADAR-" + "-".join("".join(secrets.choice(alfa) for _ in range(4)) for _ in range(3))
 
 
 # ---------------------------------------------------------------- main
 def main():
     inicio = datetime.now()
-    print("== Radar BR Spices — exportação ==")
-    print("Lendo fontes...")
+    print("== Book de Vendas BR Spices — exportação (schema 2) ==")
     fat = ler_faturamento()
     dev = ler_devolucao()
     cart = ler_carteira()
@@ -358,33 +175,101 @@ def main():
     max_emissao = fat["EMISSAO"].max()
     ano_atual, mes_atual = max_emissao.year, max_emissao.month
     corte_ly = max_emissao.replace(year=ano_atual - 1)
-    ctx = {"fat": fat, "dev": dev, "cart": cart, "metas": metas,
-           "hoje": inicio, "ano_atual": ano_atual, "mes_atual": mes_atual,
-           "corte_ly": corte_ly, "max_emissao": max_emissao}
+    print(f"Faturamento: {len(fat)} linhas úteis ({ANO_MIN}-{ano_atual}) | última emissão {max_emissao:%d/%m/%Y}")
 
-    print(f"Faturamento: {len(fat)} linhas úteis | última emissão {max_emissao:%d/%m/%Y}")
-    print(f"Metas: {len(metas)} CNPJs | Devolução: {len(dev)} | Carteira: {len(cart)}")
+    # ---- dimensão CNPJ → (bandeira, vendedor, gerente, uf)
+    dim = {}
+    for _, r in metas.iterrows():
+        band = r["CLIENTE - BANDEIRA"] or r["NOME CLIENTE PROTHEUS"] or "(SEM NOME)"
+        dim[r["CNPJ_N"]] = (band, r["VEND_BRS"] or "SEM CADASTRO",
+                            r["GR_BRS"] or "SEM CADASTRO", r["ESTADO"])
+    nomes_fat = fat.sort_values("EMISSAO").groupby("CNPJ_N")[["NOME CLIENTE", "ESTADO"]].last()
+    for cnpj in set(fat["CNPJ_N"]) - set(dim):
+        r = nomes_fat.loc[cnpj]
+        dim[cnpj] = (str(r["NOME CLIENTE"]), "SEM CADASTRO", "SEM CADASTRO", str(r["ESTADO"]))
 
-    # escopos: visão completa (admin/diretoria) + cada gerente + cada vendedor
-    cnpjs_todos = set(metas["CNPJ_N"]) | set(fat["CNPJ_N"])
-    escopos = [("gestor", nome, cnpjs_todos, {"cargo": cargo, "email": email})
+    # ---- séries mensais líquidas por CNPJ e agregação por grupo (bandeira|vendedor)
+    fmes = fat.groupby(["CNPJ_N", "ANO", "MES"])["TOTAL"].sum()
+    dmes = dev.groupby(["CNPJ_N", "ANO", "MES"])["TOTAL"].sum()
+    liq = fmes.sub(dmes, fill_value=0.0)
+    f26, d26 = fat[fat["ANO"] == 2026], dev[dev["ANO"] == 2026]
+    qmes = (f26.groupby(["CNPJ_N", "MES"])["QUANTIDADE"].sum()
+            .sub(d26.groupby(["CNPJ_N", "MES"])["QUANTIDADE"].sum(), fill_value=0.0))
+
+    groups = {}
+
+    def grupo(cnpj):
+        band, vend, ger, uf = dim.get(cnpj, (cnpj or "(DESCONHECIDO)",
+                                             "SEM CADASTRO", "SEM CADASTRO", ""))
+        k = (band, vend)
+        g = groups.get(k)
+        if g is None:
+            g = groups[k] = {"cliente": band, "vend": vend, "ger": ger,
+                             "ufs": set(), "cnpjs": set(), "ult": None,
+                             "m24": [0.0] * 12, "m25": [0.0] * 12, "m26": [0.0] * 12,
+                             "q26": [0.0] * 12, "meta": [0.0] * 12}
+        if uf:
+            g["ufs"].add(uf)
+        g["cnpjs"].add(cnpj)
+        return g
+
+    for (cnpj, ano, mes), v in liq.items():
+        grupo(cnpj)[f"m{int(ano) % 100}"][int(mes) - 1] += float(v)
+    for (cnpj, mes), v in qmes.items():
+        grupo(cnpj)["q26"][int(mes) - 1] += float(v)
+    for _, r in metas.iterrows():
+        g = grupo(r["CNPJ_N"])
+        for i, c in enumerate(COLS_MES_META):
+            g["meta"][i] += float(r[c])
+    for cnpj, ts in fat.groupby("CNPJ_N")["EMISSAO"].max().items():
+        g = grupo(cnpj)
+        if g["ult"] is None or ts > g["ult"]:
+            g["ult"] = ts
+
+    # ---- registros finais por cliente-bandeira
+    idx_atual = ano_atual * 12 + mes_atual
+    clientes = []          # (registro_json, set_de_cnpjs)
+    for g in groups.values():
+        fat26, meta_ano = sum(g["m26"]), sum(g["meta"])
+        if g["ult"] is None and fat26 == 0 and meta_ano == 0 and sum(g["m25"]) == 0:
+            continue
+        meses_sem = (idx_atual - (g["ult"].year * 12 + g["ult"].month)) if g["ult"] is not None else 99
+        status = ("ok" if meses_sem <= 0 else "atencao" if meses_sem == 1
+                  else "validar" if meses_sem == 2 else "acionar")
+        meses_ativos = sum(1 for v in g["m26"] if v != 0)
+        media = fat26 / meses_ativos if meses_ativos else 0.0
+        ufs = sorted(g["ufs"] - {""})
+        rec = {
+            "cliente": g["cliente"], "vend": g["vend"], "ger": g["ger"],
+            "uf": ufs[0] if len(ufs) == 1 else (f"{len(ufs)} UFs" if ufs else ""),
+            "cnpjs": len(g["cnpjs"]),
+            "ult": g["ult"].strftime("%Y-%m-%d") if g["ult"] is not None else None,
+            "meses_sem": int(meses_sem), "status": status,
+            "media": round(media, 2),
+            "perdido": round(media * meses_sem, 2) if meses_sem >= 1 and media > 0 else 0,
+            "m24": [round(v) for v in g["m24"]], "m25": [round(v) for v in g["m25"]],
+            "m26": [round(v) for v in g["m26"]], "q26": [round(v, 1) for v in g["q26"]],
+            "meta": [round(v) for v in g["meta"]],
+        }
+        clientes.append((rec, g["cnpjs"]))
+    clientes.sort(key=lambda t: -sum(t[0]["m26"]))
+    print(f"Clientes-bandeira: {len(clientes)} (de {len(dim)} CNPJs)")
+
+    meta_empresa = [round(metas[c].sum()) for c in COLS_MES_META[:6]] + \
+                   [METAS_EMPRESA_S2[m] for m in range(7, 13)]
+
+    # ---- escopos
+    escopos = [("gestor", nome, None, {"cargo": cargo, "email": email})
                for nome, cargo, email in ACESSO_TOTAL]
     for g in sorted(x for x in metas["GR_BRS"].unique() if x):
-        cnpjs = set(metas.loc[metas["GR_BRS"] == g, "CNPJ_N"])
-        if cnpjs:
-            escopos.append(("gerente", g, cnpjs, None))
+        escopos.append(("gerente", g, ("ger", g), None))
     for v in sorted(x for x in metas["VEND_BRS"].unique() if x):
-        cnpjs = set(metas.loc[metas["VEND_BRS"] == v, "CNPJ_N"])
-        if cnpjs:
-            escopos.append(("vendedor", v, cnpjs, None))
+        escopos.append(("vendedor", v, ("vend", v), None))
 
-    # senhas persistentes entre execuções
     senhas = {}
     if os.path.exists(SENHAS_JSON):
         with open(SENHAS_JSON, encoding="utf-8") as fh:
             senhas = json.load(fh)
-
-    # remove senhas de escopos que deixaram de existir (ex.: antigo "gestor|GESTOR")
     chaves_atuais = {f"{p}|{n}" for p, n, _, _ in escopos}
     for chave in [k for k in senhas if k not in chaves_atuais]:
         print(f"  senha descartada (escopo extinto): {chave}")
@@ -393,7 +278,40 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     arquivos_gerados = set()
     print(f"\nGerando {len(escopos)} arquivos por perfil...")
-    for perfil, nome, cnpjs, extra in escopos:
+    for perfil, nome, filtro, extra in escopos:
+        if filtro is None:
+            cls = clientes
+        else:
+            campo, valor = filtro
+            cls = [t for t in clientes if t[0][campo] == valor]
+        if not cls and perfil != "gestor":
+            continue
+        cnpjs_escopo = set().union(*[t[1] for t in cls]) if cls else set()
+
+        f_sc = fat[fat["CNPJ_N"].isin(cnpjs_escopo)]
+        d_sc = dev[dev["CNPJ_N"].isin(cnpjs_escopo)]
+        ly_mp = (f_sc[(f_sc["ANO"] == ano_atual - 1) & (f_sc["EMISSAO"] <= corte_ly)]["TOTAL"].sum()
+                 - d_sc[(d_sc["ANO"] == ano_atual - 1) & (d_sc["EMISSAO"] <= corte_ly)]["TOTAL"].sum())
+        fam = (f_sc[f_sc["ANO"] == ano_atual].groupby("NOME FAMILIA")["TOTAL"]
+               .sum().sort_values(ascending=False).head(20))
+
+        payload = {
+            "schema": 2,
+            "gerado_em": inicio.strftime("%Y-%m-%d %H:%M"),
+            "atualizado_ate": max_emissao.strftime("%Y-%m-%d"),
+            "escopo": {"perfil": perfil, "nome": nome, **(extra or {})},
+            "periodo": {"ano": ano_atual, "mes_atual": mes_atual},
+            "kpis": {
+                "carteira": round(float(cart[cart["CNPJ_N"].isin(cnpjs_escopo)]["TOTAL"].sum()), 2),
+                "devolucao": round(float(d_sc[d_sc["ANO"] == ano_atual]["TOTAL"].sum()), 2),
+                "fat_liq_ly_mp": round(float(ly_mp), 2),
+            },
+            "clientes": [t[0] for t in cls],
+            "familias": [{"nome": k, "fat": round(float(v), 2)} for k, v in fam.items()],
+        }
+        if perfil == "gestor":
+            payload["meta_empresa_mensal"] = meta_empresa
+
         chave = f"{perfil}|{nome}"
         if chave not in senhas:
             senhas[chave] = {"senha": gerar_senha(), "perfil": perfil, "nome": nome}
@@ -402,20 +320,15 @@ def main():
         senha = senhas[chave]["senha"]
         arq = nome_arquivo(senha)
         senhas[chave]["arquivo"] = arq
-        payload = montar_json(perfil, nome, cnpjs, ctx, extra)
         with open(os.path.join(DATA_DIR, arq), "w", encoding="utf-8") as fh:
             json.dump(criptografar(payload, senha), fh)
         arquivos_gerados.add(arq)
         if perfil == "gestor":
-            k = payload["kpis"]
-            print(f"  [VALIDAÇÃO gestor] fat_liq_ytd={k['fat_liq_ytd']:,.2f} "
-                  f"ly_mp={k['fat_liq_ly_mp']:,.2f} cresc={k['cresc_ytd']} "
-                  f"meta_ytd={k['meta_ytd']:,.2f} ating={k['ating_ytd']} "
-                  f"carteira={k['carteira']:,.2f} dev={k['devolucao']:,.2f} "
-                  f"base={k['clientes_base']} posit={k['positivados_mes']}")
+            tot26 = sum(sum(t[0]["m26"]) for t in cls)
+            print(f"  [VALIDAÇÃO {nome}] fat26={tot26:,.0f} ly_mp={ly_mp:,.2f} "
+                  f"clientes={len(cls)} meta_emp={sum(meta_empresa):,.0f}")
         print(f"  {perfil:9s} {nome:32s} -> data/{arq}")
 
-    # remove .enc.json órfãos (senha trocada/escopo extinto)
     for f in os.listdir(DATA_DIR):
         if f.endswith(".enc.json") and f not in arquivos_gerados:
             os.remove(os.path.join(DATA_DIR, f))
@@ -424,7 +337,7 @@ def main():
     with open(SENHAS_JSON, "w", encoding="utf-8") as fh:
         json.dump(senhas, fh, ensure_ascii=False, indent=1)
     with open(SENHAS_TXT, "w", encoding="utf-8") as fh:
-        fh.write("RADAR BR SPICES — SENHAS DE ACESSO (CONFIDENCIAL — não commitar)\n")
+        fh.write("BOOK DE VENDAS BR SPICES — SENHAS DE ACESSO (CONFIDENCIAL — não commitar)\n")
         fh.write(f"Gerado em {inicio:%d/%m/%Y %H:%M}\n\n")
         ordem = {"gestor": 0, "gerente": 1, "vendedor": 2}
         for chave in sorted(senhas, key=lambda k: (ordem.get(senhas[k]["perfil"], 9), senhas[k]["nome"])):

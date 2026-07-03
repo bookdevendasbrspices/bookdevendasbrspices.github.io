@@ -38,7 +38,7 @@
   <aside>
     <nav>
       <div class="nsec">Visão comercial</div>
-      <div class="nav-i act" data-v="geral"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Visão Geral</div>
+      <div class="nav-i act" data-v="geral"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</div>
       <div class="nav-i" data-v="metas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>Metas vs Realizado</div>
       <div class="nav-i" data-v="posit"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5.5"/></svg>Positivados</div>
       <div class="nav-i" data-v="rank"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M8 21V10M12 21V4M16 21v-7"/></svg>Rankings</div>
@@ -57,17 +57,19 @@
 
   <main>
     <div class="topbar">
+      <div class="f"><label>Ano</label><select id="f-ano"></select></div>
+      <div class="f"><label>Período</label><select id="f-per"></select></div>
       <div class="f" id="f-ger-wrap"><label>Gerente</label><select id="f-ger"></select></div>
       <div class="f" id="f-vend-wrap"><label>Vendedor</label><select id="f-vend"></select></div>
-      <button class="reset" id="btn-reset">✕ Resetar</button>
+      <button class="reset" id="btn-reset">✕ Limpar filtros</button>
       <div class="chip" id="chip-filtro" style="display:none;background:var(--warn-bg);border-color:#eadcb4;color:#8a6d1d"></div>
       <div class="chip" id="chip-periodo"></div>
     </div>
 
     <!-- ========== VISÃO GERAL ========== -->
     <section class="view on" id="v-geral">
-      <h2 class="pg">Visão Geral</h2>
-      <div class="sub">Resumo executivo do ano — valores líquidos de devolução (regra oficial do Book).</div>
+      <h2 class="pg">Overview</h2>
+      <div class="sub">Resumo executivo — valores líquidos de devolução (regra oficial do Book). Use Ano/Período para YTD, meses e quarters.</div>
       <div class="grid kpis" id="kpis"></div>
       <div class="grid duo">
         <div class="card">
