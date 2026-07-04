@@ -247,6 +247,7 @@ function periodoRapido(q) {
 }
 
 function limparFiltros() {
+  S.fGer = ""; S.fVend = "";               // zera o ESTADO, não só os campos na tela
   if ($("f-ger")) $("f-ger").value = "";
   if ($("f-vend")) $("f-vend").value = "";
   $("f-ano").value = "2026";
