@@ -1,12 +1,8 @@
 /* Utilidades compartilhadas das funções da API. */
 
-export function emailAutenticado(request, env) {
+export function emailAutenticado(request) {
   // O Cloudflare Access injeta o e-mail autenticado neste cabeçalho.
-  let email = request.headers.get("cf-access-authenticated-user-email");
-  // Modo de teste (removido no corte final): exige o segredo correto p/ simular e-mail.
-  if (!email && env.DEBUG_EMAIL && env.DEBUG_EMAIL.length > 20 &&
-      request.headers.get("x-debug-secret") === env.DEBUG_EMAIL)
-    email = request.headers.get("x-debug-email");
+  const email = request.headers.get("cf-access-authenticated-user-email");
   return email ? email.trim().toLowerCase() : null;
 }
 
