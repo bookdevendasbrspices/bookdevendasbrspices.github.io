@@ -861,11 +861,27 @@ const FAT_COLS = [
   { k: "anoAnt", t: "Ano ant.", sort: "anoAnt" },
 ];
 
+/* soma todas as fatias (vendedores) de uma mesma bandeira, unificando as UFs */
+function agregarPorBandeira(linhas) {
+  const map = {};
+  for (const c of linhas) {
+    const g = (map[c.cliente] ??= { cliente: c.cliente, meta: Array(12).fill(0), ufs: {} });
+    c.meta.forEach((v, i) => g.meta[i] += v || 0);
+    for (const u of c.ufs) {
+      const t = (g.ufs[u.uf] ??= { uf: u.uf, m25: Array(12).fill(0), m26: Array(12).fill(0),
+                                    q25: Array(12).fill(0), q26: Array(12).fill(0) });
+      for (const k of ["m25", "m26", "q25", "q26"]) u[k].forEach((v, i) => t[k][i] += v || 0);
+    }
+  }
+  return Object.values(map).map((g) => ({ cliente: g.cliente, meta: g.meta, ufs: Object.values(g.ufs) }));
+}
+
 function desenharFat() {
-  // filtra pelos filtros de gerente/vendedor e calcula métricas
+  // filtra pelos filtros de gerente/vendedor e agrega por BANDEIRA (todas as fatias somadas)
   let linhas = FAT.cube.clientes;
   if (S.fGer) linhas = linhas.filter((c) => c.ger === S.fGer);
   if (S.fVend) linhas = linhas.filter((c) => c.vend === S.fVend);
+  linhas = agregarPorBandeira(linhas);
   let itens = linhas.map((c) => ({ c, m: metricasCliente(c) }));
   const totalF26 = itens.reduce((s, x) => s + x.m.f26, 0) || 1;
 
@@ -887,9 +903,9 @@ function desenharFat() {
   itens.forEach((x, i) => {
     const { c, m } = x;
     const cai = m.f26 < m.f25;                 // caindo vs ano anterior → vermelho
-    const aberto = !!FAT.abertos[c.cliente + "|" + c.vend];
+    const aberto = !!FAT.abertos[c.cliente];
     const seta = c.ufs.length > 1 ? (aberto ? "▾" : "▸") : "·";
-    corpo += `<tr class="fat-cli${cai ? " fat-cai" : ""}" data-cli="${esc(c.cliente + "|" + c.vend)}">
+    corpo += `<tr class="fat-cli${cai ? " fat-cai" : ""}" data-cli="${esc(c.cliente)}">
       <td class="r"><b>${i + 1}</b></td>
       <td><span class="fat-exp">${seta}</span> <b>${esc(c.cliente)}</b></td>
       ${celFat(m, totalF26)}</tr>`;
