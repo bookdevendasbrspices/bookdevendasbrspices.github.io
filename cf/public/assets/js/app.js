@@ -114,12 +114,14 @@ async function trocarSenha() {
 
 /* ---------------- período (multi-seleção de meses) ---------------- */
 function mesesSel() { return [...S.meses].sort((a, b) => a - b); }
+/* último mês FECHADO do ano corrente (o mês em andamento é parcial) */
+const mesFechado = () => (S.data.periodo.mes_atual - 1) || 1;
 
 function rotuloPer() {
-  const m = mesesSel(), mAtual = S.data.periodo.mes_atual;
+  const m = mesesSel(), mF = mesFechado();
   const eq = (arr) => arr.length === m.length && arr.every((x, i) => x === m[i]);
   if (!m.length) return "Selecione…";
-  if (eq(seq(1, mAtual)) && S.ano === S.data.periodo.ano) return `YTD (jan–${MESES[mAtual - 1]})`;
+  if (eq(seq(1, mF)) && S.ano === S.data.periodo.ano) return `YTD (jan–${MESES[mF - 1]})`;
   if (m.length === 12) return "Ano completo";
   if (eq(seq(1, 6))) return "H1";
   if (eq(seq(7, 12))) return "H2";
@@ -180,8 +182,8 @@ function boot() {
   const dt = new Date(d.atualizado_ate + "T12:00:00");
   S.fracMes = dt.getDate() / new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
 
-  // período: YTD por padrão + meses com checkbox
-  S.meses = seq(1, d.periodo.mes_atual);
+  // período: YTD (até o mês fechado) por padrão + meses com checkbox
+  S.meses = seq(1, (d.periodo.mes_atual - 1) || 1);
   $("per-meses").innerHTML = MESES.map((m, i) =>
     `<label class="permes"><input type="checkbox" data-mes="${i + 1}"><span>${m}</span></label>`).join("");
   atualizarPerBtns();
@@ -237,10 +239,10 @@ function togglePerPanel(abrir) {
   p.classList.toggle("on", abrir != null ? abrir : !p.classList.contains("on"));
 }
 function periodoRapido(q) {
-  const mA = S.data.periodo.mes_atual;
-  const mapa = { ytd: seq(1, mA), ano: seq(1, 12), h1: seq(1, 6), h2: seq(7, 12),
+  const mF = mesFechado();
+  const mapa = { ytd: seq(1, mF), ano: seq(1, 12), h1: seq(1, 6), h2: seq(7, 12),
                  q1: seq(1, 3), q2: seq(4, 6), q3: seq(7, 9), q4: seq(10, 12), limpar: [] };
-  aplicarPeriodo(mapa[q] || seq(1, mA));
+  aplicarPeriodo(mapa[q] || seq(1, mF));
 }
 
 function limparFiltros() {
@@ -251,7 +253,7 @@ function limparFiltros() {
   $("busca-pos").value = ""; $("busca-meta").value = "";
   document.querySelectorAll(".fchip[data-st]").forEach((x) => x.classList.remove("on"));
   S.ano = 2026;
-  S.meses = seq(1, S.data.periodo.mes_atual);
+  S.meses = seq(1, mesFechado());
   atualizarVendSelect(); atualizarPerBtns();
   S.nPos = 100; S.nCli = 50;
   renderAll();
@@ -741,7 +743,7 @@ async function exportExcel() {
         m.f26 / (base || 1), Math.round(m.v25), Math.round(m.v26), m.crv,
         m.meta ? Math.round(m.meta) : null, Math.round(m.realizado), m.ating,
         m.gap == null ? null : Math.round(m.gap), Math.round(m.anoAnt)];
-      xlTabela(ws, `Faturamento por cliente — 2025/2026/volumes travados no fechado · Meta em diante: ${rotuloPer()}`,
+      xlTabela(ws, `Faturamento por cliente — período: ${rotuloPer()}`,
         cab, [...itens.map((x, i) => linha(i + 1, x.c.cliente, x.m, totalF26)),
               linha(null, `TOTAL GERAL (${itens.length} clientes)`, tot, totalF26)],
         fmts, [5, 36, 14, 14, 10, 9, 11, 11, 11, 13, 13, 9, 13, 14]);
@@ -849,37 +851,30 @@ async function renderFat() {
   desenharFat();
 }
 
-/* soma jan..mês-fechado (mês corrente é parcial e não entra nas colunas travadas) */
-function somaFechado(arr) {
-  const fim = (S.data.periodo.mes_atual - 1) || 1;
-  let s = 0; for (let m = 1; m <= fim; m++) s += arr[m - 1] || 0; return s;
-}
 const somaMeses = (arr, meses) => meses.reduce((s, m) => s + (arr[m - 1] || 0), 0);
+/* soma p/ comparação (ano anterior/meta): o mês corrente, parcial, entra pro-rata pelos dias decorridos */
+function somaMesesPr(arr, meses) {
+  const mA = S.data.periodo.mes_atual;
+  return meses.reduce((s, m) => s + (arr[m - 1] || 0) * (m === mA ? S.fracMes : 1), 0);
+}
 
-function metricasCliente(c) {
-  // colunas travadas no YTD-fechado (jan..mês-fechado)
-  const f25 = c.ufs.reduce((s, u) => s + somaFechado(u.m25), 0);
-  const f26 = c.ufs.reduce((s, u) => s + somaFechado(u.m26), 0);
-  const v25 = c.ufs.reduce((s, u) => s + somaFechado(u.q25), 0);
-  const v26 = c.ufs.reduce((s, u) => s + somaFechado(u.q26), 0);
-  // colunas que seguem o período selecionado
-  const meses = mesesSel();
-  const realizado = c.ufs.reduce((s, u) => s + somaMeses(u.m26, meses), 0);
-  const anoAnt = c.ufs.reduce((s, u) => s + somaMeses(u.m25, meses), 0);
-  const meta = somaMeses(c.meta, meses);
+/* TODAS as colunas seguem o período selecionado; 2025 (ano ant.) e meta entram
+   pro-rata no mês em andamento p/ comparação justa com o parcial de 2026 */
+function montarMetFat(f25, f26, v25, v26, meta) {
   return { f25, f26, cr: f25 > 0 ? (f26 - f25) / f25 : null,
            v25, v26, crv: v25 > 0 ? (v26 - v25) / v25 : null,
-           realizado, anoAnt, meta, ating: meta ? realizado / meta : null, gap: meta ? realizado - meta : null };
+           realizado: f26, anoAnt: f25, meta,
+           ating: meta ? f26 / meta : null, gap: meta ? f26 - meta : null };
+}
+function metricasCliente(c) {
+  const meses = mesesSel();
+  const soma = (k, pr) => c.ufs.reduce((s, u) => s + (pr ? somaMesesPr(u[k], meses) : somaMeses(u[k], meses)), 0);
+  return montarMetFat(soma("m25", 1), soma("m26"), soma("q25", 1), soma("q26"), somaMesesPr(c.meta, meses));
 }
 function metricasUF(u) {
-  const f25 = somaFechado(u.m25), f26 = somaFechado(u.m26);
-  const v25 = somaFechado(u.q25), v26 = somaFechado(u.q26);
   const meses = mesesSel();
-  const realizado = somaMeses(u.m26, meses), anoAnt = somaMeses(u.m25, meses);
-  const meta = somaMeses(u.meta || [], meses);
-  return { f25, f26, cr: f25 > 0 ? (f26 - f25) / f25 : null,
-           v25, v26, crv: v25 > 0 ? (v26 - v25) / v25 : null,
-           realizado, anoAnt, meta, ating: meta ? realizado / meta : null, gap: meta ? realizado - meta : null };
+  return montarMetFat(somaMesesPr(u.m25, meses), somaMeses(u.m26, meses),
+                      somaMesesPr(u.q25, meses), somaMeses(u.q26, meses), somaMesesPr(u.meta || [], meses));
 }
 
 const farol = (x) => x == null ? "" : x >= 0.12 ? "cor-ok" : x >= 0 ? "cor-med" : "cor-bad";
