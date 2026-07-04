@@ -1,8 +1,8 @@
 /* GET /api/escopos — lista as visões disponíveis p/ o formulário do admin. */
-import { emailAutenticado, registroUsuarios, json } from "./_lib.js";
+import { emailSessao, registroUsuarios, json } from "./_lib.js";
 
 export async function onRequestGet({ request, env }) {
-  const email = emailAutenticado(request, env);
+  const email = await emailSessao(request, env);
   if (!email) return json({ erro: "nao_autenticado" }, 401);
   const usuarios = await registroUsuarios(env);
   if (!usuarios[email] || !usuarios[email].admin) return json({ erro: "sem_permissao" }, 403);

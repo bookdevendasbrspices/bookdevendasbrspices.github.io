@@ -21,7 +21,7 @@
     <a href="index.html">← Voltar ao painel</a>
   </div>
   <div class="sub">Inclua ou remova quem pode acessar o Book de Vendas. Cada pessoa entra com o
-    próprio e-mail (recebe um código — não existe senha para gerenciar).</div>
+    e-mail e a senha que você definir aqui.</div>
 
   <div class="lerr" id="adm-err" style="margin-bottom:14px"></div>
 
@@ -29,16 +29,18 @@
     <h3>Incluir usuário</h3>
     <div class="tctl" style="align-items:flex-end">
       <div class="f"><label>Nome completo</label><input id="n-nome" placeholder="Ex.: Maria Silva" style="min-width:200px"></div>
-      <div class="f"><label>E-mail (será o acesso)</label><input id="n-email" placeholder="maria@brspices.com.br" style="min-width:230px"></div>
-      <div class="f"><label>O que pode ver</label><select id="n-escopo" style="min-width:230px"></select></div>
-      <div class="f"><label>Cargo (opcional)</label><input id="n-cargo" placeholder="Ex.: GERENTE SUL" style="min-width:140px"></div>
+      <div class="f"><label>E-mail (será o login)</label><input id="n-email" placeholder="maria@brspices.com.br" style="min-width:220px"></div>
+      <div class="f"><label>Senha inicial</label><input id="n-senha" placeholder="mínimo 6 caracteres" style="min-width:150px"></div>
+      <div class="f"><label>O que pode ver</label><select id="n-escopo" style="min-width:220px"></select></div>
+      <div class="f"><label>Cargo (opcional)</label><input id="n-cargo" placeholder="Ex.: GERENTE SUL" style="min-width:130px"></div>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);padding-bottom:9px">
         <input type="checkbox" id="n-admin"> também administra usuários</label>
       <button class="reset exp" id="btn-incluir" style="padding:10px 20px">+ Incluir</button>
     </div>
     <div class="note">💡 "Visão completa" enxerga a empresa toda. Gerentes veem a própria equipe;
-      vendedores, a própria carteira. Após incluir, avise a pessoa: ela acessa o site, digita o
-      e-mail e recebe o código de entrada.</div>
+      vendedores, a própria carteira. Após incluir, passe o <b>e-mail e a senha inicial</b> à pessoa —
+      ela entra e pode trocar a senha depois. Para redefinir uma senha esquecida, use o botão
+      <b>"Nova senha"</b> na lista.</div>
   </div>
 
   <div class="gap14"></div>

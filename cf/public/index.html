@@ -10,17 +10,33 @@
 </head>
 <body>
 
-<!-- ================= PORTÃO (carregando / sem cadastro) ================= -->
+<!-- ================= TELA DE ENTRADA (login + senha) ================= -->
 <div id="gate">
   <div class="lbox">
     <img class="lg" src="assets/img/book-de-vendas.svg" alt="Book de Vendas BR Spices">
     <h1>Book de Vendas <b>BR Spices</b></h1>
     <svg class="brush" viewBox="0 0 130 9"><path d="M2 6 Q33 1 65 4 T128 3" stroke="#F7E7D2" stroke-width="3.4" fill="none" stroke-linecap="round" opacity=".9"/></svg>
-    <p id="gate-msg">Abrindo seus dados…</p>
-    <div class="lerr" id="gate-err"></div>
-    <button id="gate-retry" style="display:none">Tentar de novo</button>
-    <div class="lnote">Acesso individual pelo seu e-mail corporativo.<br>
-      Problemas de acesso? Fale com o administrativo.</div>
+
+    <!-- carregando (antes de saber se há sessão) -->
+    <p id="gate-load">Carregando…</p>
+
+    <!-- formulário de login -->
+    <form id="gate-form" style="display:none" autocomplete="on">
+      <p class="lsub">Entre com seu e-mail e senha.</p>
+      <div class="lerr" id="gate-err"></div>
+      <input type="email" id="lg-email" placeholder="Seu e-mail" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <input type="password" id="lg-senha" placeholder="Senha" autocomplete="current-password" required>
+      <button type="submit" id="lg-btn">Entrar</button>
+      <div class="lnote"><a id="lg-forgot">Esqueci minha senha</a><br>
+        Você permanece conectado neste aparelho.</div>
+    </form>
+
+    <!-- aviso "esqueci minha senha" -->
+    <div id="gate-forgot" style="display:none">
+      <p class="lsub">Para redefinir sua senha, peça ao administrativo — ele gera uma nova
+        na hora e te passa. Depois de entrar, você pode trocá-la por uma de sua preferência.</p>
+      <button type="button" id="fg-voltar">← Voltar</button>
+    </div>
   </div>
 </div>
 
@@ -51,7 +67,7 @@
       <b id="who-nome"></b>
       <span id="who-email" style="display:block;font-size:10.5px"></span>
       <span class="pill" id="who-pill"></span><br>
-      <a id="who-sair">Sair do painel</a>
+      <a id="who-senha">Trocar senha</a> · <a id="who-sair">Sair</a>
     </div>
   </aside>
 

@@ -32,35 +32,74 @@ function fmtData(iso) {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const nomeVend = (v) => String(v ?? "").replace(/^\s*\d+\s*-\s*/, "");
 
-/* ---------------- carga dos dados (autenticação = Cloudflare Access por e-mail) ---------------- */
+/* ---------------- autenticação (login + senha, sessão persistente) ---------------- */
+function mostrarLogin(msg) {
+  $("gate-load").style.display = "none";
+  $("gate-forgot").style.display = "none";
+  $("gate-form").style.display = "";
+  const err = $("gate-err");
+  if (msg) { err.textContent = msg; err.style.display = "block"; }
+  else err.style.display = "none";
+  setTimeout(() => $("lg-email").focus(), 50);
+}
+
 async function init() {
-  const msg = $("gate-msg"), err = $("gate-err"), retry = $("gate-retry");
-  err.style.display = "none"; retry.style.display = "none";
-  msg.textContent = "Abrindo seus dados…";
   try {
     const res = await fetch("/api/dados", { cache: "no-store" });
-    if (res.status === 403) {
-      const corpo = await res.json().catch(() => ({}));
-      msg.textContent = "";
-      err.innerHTML = `O e-mail <b>${esc(corpo.email || "autenticado")}</b> ainda não tem acesso liberado.<br>Peça a inclusão ao administrativo.`;
-      err.style.display = "block";
-      return;
-    }
-    if (res.status === 401) throw new Error("Sessão de acesso não encontrada — recarregue a página.");
-    if (!res.ok) throw new Error("Dados indisponíveis no momento (" + res.status + ").");
+    if (res.status === 401) return mostrarLogin();          // sem sessão → tela de login
+    if (res.status === 403) return mostrarLogin("Seu acesso ainda não foi liberado. Fale com o administrativo.");
+    if (!res.ok) return mostrarLogin("Dados indisponíveis no momento. Tente novamente.");
     S.data = await res.json();
-    if (S.data.schema !== 2) throw new Error("Dados em atualização — tente novamente em instantes.");
+    if (S.data.schema !== 2) return mostrarLogin("Dados em atualização — tente novamente em instantes.");
     boot();
-  } catch (e) {
-    msg.textContent = "";
-    err.textContent = e.message || "Falha ao abrir os dados.";
-    err.style.display = "block";
-    retry.style.display = "";
+  } catch {
+    mostrarLogin("Falha de conexão. Verifique a internet e tente de novo.");
   }
 }
 
-function sair() {
-  location.href = "/cdn-cgi/access/logout";
+async function fazerLogin(ev) {
+  ev.preventDefault();
+  const btn = $("lg-btn"), err = $("gate-err");
+  const email = $("lg-email").value.trim().toLowerCase();
+  const senha = $("lg-senha").value;
+  err.style.display = "none";
+  if (!email || !senha) return;
+  btn.disabled = true; btn.textContent = "Entrando…";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, senha }),
+    });
+    if (res.ok) { $("lg-senha").value = ""; await init(); return; }
+    const c = await res.json().catch(() => ({}));
+    err.textContent = res.status === 429 ? "Muitas tentativas. Aguarde uns minutos e tente de novo."
+      : c.erro === "credenciais" ? "E-mail ou senha incorretos." : "Não foi possível entrar.";
+    err.style.display = "block";
+  } catch {
+    err.textContent = "Falha de conexão."; err.style.display = "block";
+  } finally {
+    btn.disabled = false; btn.textContent = "Entrar";
+  }
+}
+
+async function sair() {
+  try { await fetch("/api/logout", { method: "POST" }); } catch {}
+  location.reload();
+}
+
+async function trocarSenha() {
+  const atual = prompt("Senha atual:");
+  if (atual == null) return;
+  const nova = prompt("Nova senha (mínimo 6 caracteres):");
+  if (nova == null) return;
+  if (nova.length < 6) { alert("A nova senha precisa ter ao menos 6 caracteres."); return; }
+  const res = await fetch("/api/senha", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ senhaAtual: atual, senhaNova: nova }),
+  });
+  const c = await res.json().catch(() => ({}));
+  alert(res.ok ? "Senha alterada com sucesso." :
+    c.erro === "senha_atual_incorreta" ? "A senha atual está incorreta." : "Não foi possível alterar a senha.");
 }
 
 /* ---------------- período ---------------- */
@@ -679,7 +718,10 @@ function trocarView(v) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  $("gate-retry").addEventListener("click", init);
+  $("gate-form").addEventListener("submit", fazerLogin);
+  $("lg-forgot").addEventListener("click", () => { $("gate-form").style.display = "none"; $("gate-forgot").style.display = ""; });
+  $("fg-voltar").addEventListener("click", () => mostrarLogin());
+  $("who-senha").addEventListener("click", trocarSenha);
   document.querySelectorAll(".nav-i[data-v]").forEach((el) => el.addEventListener("click", () => trocarView(el.dataset.v)));
   ["f-ger", "f-vend", "f-ano", "f-per"].forEach((id) => $(id)?.addEventListener("change", onFiltro));
   $("btn-reset").addEventListener("click", limparFiltros);

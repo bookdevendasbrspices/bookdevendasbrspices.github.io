@@ -1,8 +1,8 @@
-/* GET /api/dados — devolve o recorte de dados do e-mail autenticado. */
-import { emailAutenticado, registroUsuarios, json } from "./_lib.js";
+/* GET /api/dados — devolve o recorte de dados do usuário logado (sessão por cookie). */
+import { emailSessao, registroUsuarios, json } from "./_lib.js";
 
 export async function onRequestGet({ request, env }) {
-  const email = emailAutenticado(request, env);
+  const email = await emailSessao(request, env);
   if (!email) return json({ erro: "nao_autenticado" }, 401);
 
   const usuarios = await registroUsuarios(env);
@@ -13,7 +13,6 @@ export async function onRequestGet({ request, env }) {
   if (!raw) return json({ erro: "dados_indisponiveis", chave: u.chave }, 503);
 
   const dados = JSON.parse(raw);
-  // identidade exibida vem do cadastro (não do arquivo de escopo)
   dados.escopo = {
     ...dados.escopo,
     nome: u.nome || dados.escopo.nome,

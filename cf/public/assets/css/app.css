@@ -44,7 +44,11 @@ button{font-family:inherit}
   box-shadow:0 10px 24px -10px rgba(12,32,35,.6);transition:transform .12s}
 .lbox button:hover{transform:translateY(-1px);filter:brightness(1.08)}
 .lbox button:disabled{opacity:.6;cursor:wait;transform:none}
-.lnote{font-size:11.5px;color:rgba(255,255,255,.75);text-align:center;margin-top:14px;line-height:1.6}
+.lsub{color:rgba(255,255,255,.9);font-size:13px;margin-bottom:16px}
+.lnote{font-size:11.5px;color:rgba(255,255,255,.75);text-align:center;margin-top:14px;line-height:1.7}
+.lnote a{color:var(--creme);text-decoration:underline;cursor:pointer}
+#gate-load{color:rgba(255,255,255,.85);font-size:13px}
+#gate-forgot button,#gate-form #lg-btn{margin-top:2px}
 .lerr{display:none;background:var(--bad-bg);color:var(--bad);border-radius:10px;padding:9px 13px;
   font-size:12.5px;font-weight:600;margin-bottom:13px}
 
