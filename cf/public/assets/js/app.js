@@ -2,10 +2,11 @@
    Login: senha → SHA-256 → data/<hash>.enc.json → PBKDF2 + AES-GCM (WebCrypto). */
 "use strict";
 
-const S = { data: null, fGer: "", fVend: "", ano: 2026, per: "ytd",
+const S = { data: null, fGer: "", fVend: "", ano: 2026, meses: [],
             nPos: 100, nCli: 50, fStatus: "", busca: "", buscaMeta: "", fracMes: 1 };
 const $ = (id) => document.getElementById(id);
 const MESES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+const seq = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
 /* ---------------- formatação ---------------- */
 const fmtBR = (v, d = 0) => (v ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -102,19 +103,23 @@ async function trocarSenha() {
     c.erro === "senha_atual_incorreta" ? "A senha atual está incorreta." : "Não foi possível alterar a senha.");
 }
 
-/* ---------------- período ---------------- */
-function mesesSel() {
-  const mAtual = S.data.periodo.mes_atual;
-  if (S.per === "ytd") return Array.from({ length: mAtual }, (_, i) => i + 1);
-  if (S.per === "ano") return Array.from({ length: 12 }, (_, i) => i + 1);
-  const q = /^q([1-4])$/.exec(S.per);
-  if (q) { const b = (q[1] - 1) * 3; return [b + 1, b + 2, b + 3]; }
-  return [parseInt(S.per, 10)];
+/* ---------------- período (multi-seleção de meses) ---------------- */
+function mesesSel() { return [...S.meses].sort((a, b) => a - b); }
+
+function rotuloPer() {
+  const m = mesesSel(), mAtual = S.data.periodo.mes_atual;
+  const eq = (arr) => arr.length === m.length && arr.every((x, i) => x === m[i]);
+  if (!m.length) return "Selecione…";
+  if (eq(seq(1, mAtual)) && S.ano === S.data.periodo.ano) return `YTD (jan–${MESES[mAtual - 1]})`;
+  if (m.length === 12) return "Ano completo";
+  if (eq(seq(1, 6))) return "1º semestre";
+  if (eq(seq(7, 12))) return "2º semestre";
+  for (let q = 0; q < 4; q++) if (eq(seq(q * 3 + 1, q * 3 + 3))) return "Q" + (q + 1);
+  if (m.length === 1) return MESES[m[0] - 1];
+  const contig = m.every((x, i) => i === 0 || x === m[i - 1] + 1);
+  if (contig) return `${MESES[m[0] - 1]}–${MESES[m[m.length - 1] - 1]}`;
+  return m.map((x) => MESES[x - 1]).join(", ");
 }
-const rotuloPer = () => S.per === "ytd" ? `YTD (jan–${MESES[S.data.periodo.mes_atual - 1]})`
-  : S.per === "ano" ? "Ano completo"
-  : /^q\d$/.test(S.per) ? S.per.toUpperCase()
-  : MESES[S.per - 1];
 
 function serie(c, ano) { return ano === 2026 ? c.m26 : ano === 2025 ? c.m25 : ano === 2024 ? c.m24 : null; }
 
@@ -139,9 +144,8 @@ function somaLY(rows, meses) {
 }
 function metaPer(rows, meses) {
   if (S.ano !== 2026) return null;
-  /* no YTD, a meta do mês corrente entra pro-rata (dias decorridos) */
-  const peso = (m) => (S.per === "ytd" && S.ano === S.data.periodo.ano &&
-                       m === S.data.periodo.mes_atual) ? S.fracMes : 1;
+  /* o mês corrente (parcial) entra pro-rata pelos dias decorridos */
+  const peso = (m) => (S.ano === S.data.periodo.ano && m === S.data.periodo.mes_atual) ? S.fracMes : 1;
   const me = S.data.meta_empresa_mensal;
   if (me && !filtrado()) return meses.reduce((s, m) => s + (me[m - 1] || 0) * peso(m), 0);
   let s = 0;
@@ -161,18 +165,16 @@ function boot() {
   $("who-nome").textContent = d.escopo.nome;
   $("who-email").textContent = d.escopo.email || d.escopo.login || "";
   $("who-pill").textContent = "PERFIL: " + perfilTxt;
-  $("hchip").innerHTML = `📅 dados até <b>${fmtData(d.atualizado_ate)}</b>`;
+  $("foot-data").innerHTML = `📅 Atualizado em: <b>${fmtData(d.atualizado_ate)}</b>`;
 
   // fração do mês corrente decorrida (p/ comparar 2025 pro-rata)
   const dt = new Date(d.atualizado_ate + "T12:00:00");
   S.fracMes = dt.getDate() / new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
 
-  // seletor de período
-  $("f-per").innerHTML =
-    `<option value="ytd">YTD (jan–${MESES[d.periodo.mes_atual - 1]})</option>` +
-    `<option value="ano">Ano completo</option>` +
-    ["q1", "q2", "q3", "q4"].map((q) => `<option value="${q}">${q.toUpperCase()}</option>`).join("") +
-    MESES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+  // período: YTD por padrão + botões de mês
+  S.meses = seq(1, d.periodo.mes_atual);
+  $("per-meses").innerHTML = MESES.map((m, i) =>
+    `<button type="button" data-mes="${i + 1}">${m}</button>`).join("");
   $("f-ano").innerHTML = `<option>2026</option><option>2025</option>`;
 
   const gers = [...new Set(d.clientes.map((p) => p.ger))].filter(Boolean).sort();
@@ -203,20 +205,46 @@ function onFiltro() {
   S.fGer = $("f-ger-wrap").style.display === "none" ? "" : $("f-ger").value;
   S.fVend = $("f-vend-wrap").style.display === "none" ? "" : $("f-vend").value;
   S.ano = parseInt($("f-ano").value, 10);
-  S.per = $("f-per").value;
   atualizarVendSelect();
   S.nPos = 100; S.nCli = 50;
   renderAll();
 }
 
+/* ---- painel de período ---- */
+function atualizarPerBtns() {
+  document.querySelectorAll("#per-meses button").forEach((b) =>
+    b.classList.toggle("sel", S.meses.includes(+b.dataset.mes)));
+  $("per-btn").textContent = rotuloPer();
+}
+function aplicarPeriodo(meses) {
+  S.meses = [...new Set(meses)].filter((m) => m >= 1 && m <= 12);
+  S.nPos = 100; S.nCli = 50;
+  atualizarPerBtns();
+  renderAll();
+}
+function togglePerPanel(abrir) {
+  const p = $("per-panel");
+  p.classList.toggle("on", abrir != null ? abrir : !p.classList.contains("on"));
+}
+function periodoRapido(q) {
+  const mA = S.data.periodo.mes_atual;
+  const mapa = { ytd: seq(1, mA), ano: seq(1, 12), h1: seq(1, 6), h2: seq(7, 12),
+                 q1: seq(1, 3), q2: seq(4, 6), q3: seq(7, 9), q4: seq(10, 12) };
+  aplicarPeriodo(mapa[q] || seq(1, mA));
+}
+
 function limparFiltros() {
   if ($("f-ger")) $("f-ger").value = "";
   if ($("f-vend")) $("f-vend").value = "";
-  $("f-ano").value = "2026"; $("f-per").value = "ytd";
+  $("f-ano").value = "2026";
   S.fStatus = ""; S.busca = ""; S.buscaMeta = "";
   $("busca-pos").value = ""; $("busca-meta").value = "";
   document.querySelectorAll(".fchip[data-st]").forEach((x) => x.classList.remove("on"));
-  onFiltro();
+  S.ano = 2026;
+  S.meses = seq(1, S.data.periodo.mes_atual);
+  atualizarVendSelect(); atualizarPerBtns();
+  S.nPos = 100; S.nCli = 50;
+  renderAll();
 }
 
 function linhas() {
@@ -241,16 +269,17 @@ function renderAll() {
 }
 
 function renderChips() {
-  $("chip-periodo").textContent = `${S.ano} · ${rotuloPer()} · dados até ${fmtData(S.data.atualizado_ate)}`;
-  const f = [];
+  $("per-btn").textContent = rotuloPer();
+  const f = [S.ano + " · " + rotuloPer()];
   if (S.fGer) f.push("Gerente: " + S.fGer);
   if (S.fVend) f.push("Vendedor: " + nomeVend(S.fVend));
   $("chip-filtro").textContent = f.join(" · ");
-  $("chip-filtro").style.display = f.length ? "" : "none";
+  $("chip-filtro").style.display = "";
 }
 
-function kpiCard(icone, cor, titulo, valor, detalhe) {
-  return `<div class="kpi"><div class="hd"><div class="ic" style="background:${cor}22">${icone}</div>
+function kpiCard(icone, cor, titulo, valor, detalhe, nav) {
+  const cls = nav ? ' klick" data-nav="' + nav : "";
+  return `<div class="kpi${cls}"><div class="hd"><div class="ic" style="background:${cor}22">${icone}</div>
     <div class="t">${titulo}</div></div><div class="v">${valor}</div><div class="d">${detalhe}</div></div>`;
 }
 
@@ -272,7 +301,7 @@ function renderKpis(rows, meses) {
   const ating = meta ? fat / meta : null;
   const gap = meta ? fat - meta : null;
 
-  const ehYtd = S.per === "ytd", noMes = ehYtd && S.ano === d.periodo.ano;
+  const noMes = S.ano === d.periodo.ano && meses.includes(d.periodo.mes_atual);
   const positivados = noMes
     ? rows.filter((p) => p.status === "ok").length
     : rows.filter((p) => { const a = serie(p, S.ano); return a && meses.some((m) => a[m - 1]); }).length;
@@ -292,7 +321,7 @@ function renderKpis(rows, meses) {
       crescPill + `vs ${S.ano - 1} mesmo período (${fmtM(ly)})`) +
     kpiCard(IC.meta, "#E0A339", "Atingimento<br>da meta", `<span style="color:${atingCor}">${fmtPct(ating)}</span>`,
       meta ? `meta ${fmtM(meta)} · ${gap >= 0 ? "sobra" : "falta"} <b style="color:${gap >= 0 ? "var(--ok)" : "var(--bad)"}">${fmtM(Math.abs(gap))}</b>`
-           : "sem meta no período/seleção") +
+           : "sem meta no período/seleção", "metas") +
     kpiCard(IC.vol, "#9B9741", "Volume<br>(caixas)", vol == null ? "—" : fmtNum(vol),
       ticket ? `Ticket médio <b>${fmtM(ticket)}</b>` : "Ticket médio —") +
     kpiCard(IC.cart, "#4f9aa0", "Pedidos<br>em carteira", filtrado() ? "—" : fmtM(k.carteira),
@@ -301,7 +330,10 @@ function renderKpis(rows, meses) {
       filtrado() ? escT : "já abatida do líquido") +
     kpiCard(IC.pos, "#8AAB83", `Positivados<br>${noMes ? "no mês" : "no período"}`,
       `${fmtBR(positivados)}<small>/${fmtBR(base)}</small>`,
-      base ? `<b style="color:var(--teal-d)">${fmtPct(positivados / base)}</b> da base` : "");
+      base ? `<b style="color:var(--teal-d)">${fmtPct(positivados / base)}</b> da base` : "", "posit");
+
+  document.querySelectorAll("#kpis .kpi.klick").forEach((el) =>
+    el.addEventListener("click", () => trocarView(el.dataset.nav)));
 }
 
 /* ---------- evolução: sempre os últimos 12 meses ---------- */
@@ -521,7 +553,7 @@ function renderRankings(rows, meses) {
   $("rk-cli").innerHTML = c.map(({ p, f }, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtM(f))).join("");
   const fm = (d.familias || []).slice(0, 10);
   $("rk-fam").innerHTML = fm.map((o, i) => liRank(i, o.nome, null, fmtM(o.fat))).join("");
-  $("rk-fam-nota").style.display = (filtrado() || S.per !== "ytd" || S.ano !== 2026) ? "" : "none";
+  $("rk-fam-nota").style.display = (filtrado() || S.ano !== 2026) ? "" : "none";
 }
 
 /* ---------------- exportação PDF / Excel ---------------- */
@@ -535,7 +567,7 @@ function contextoTxt() {
   return `${S.ano} · ${rotuloPer()}${f.length ? " · " + f.join(" · ") : ""} · dados até ${fmtData(S.data.atualizado_ate)}`;
 }
 const arquivoNome = (ext) =>
-  `book-vendas-${viewAtiva()}-${S.ano}-${S.per}${S.fGer ? "-" + S.fGer.toLowerCase().replace(/\W+/g, "_") : ""}${S.fVend ? "-" + nomeVend(S.fVend).toLowerCase().replace(/\W+/g, "_") : ""}.${ext}`;
+  `book-vendas-${viewAtiva()}-${S.ano}-${rotuloPer().toLowerCase().replace(/\W+/g, "_")}${S.fGer ? "-" + S.fGer.toLowerCase().replace(/\W+/g, "_") : ""}${S.fVend ? "-" + nomeVend(S.fVend).toLowerCase().replace(/\W+/g, "_") : ""}.${ext}`;
 
 function exportPDF() {
   $("print-head").innerHTML =
@@ -551,16 +583,52 @@ function exportPDF() {
   setTimeout(restaurar, 2000);          // fallback (Safari/afterprint ausente)
 }
 
-let _exceljs = null;
-function comExcelJS() {
-  if (_exceljs) return Promise.resolve(_exceljs);
+const _libs = {};
+function carregarLib(url, global) {
+  if (_libs[global]) return Promise.resolve(window[global]);
   return new Promise((ok, ko) => {
     const sc = document.createElement("script");
-    sc.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
-    sc.onload = () => ok(_exceljs = window.ExcelJS);
-    sc.onerror = () => ko(new Error("Sem internet para carregar o gerador de Excel."));
+    sc.src = url;
+    sc.onload = () => { _libs[global] = 1; ok(window[global]); };
+    sc.onerror = () => ko(new Error("Sem internet para carregar o gerador."));
     document.head.appendChild(sc);
   });
+}
+const comExcelJS = () => carregarLib("https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js", "ExcelJS");
+const comHtml2Canvas = () => carregarLib("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js", "html2canvas");
+const comPptx = () => carregarLib("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js", "PptxGenJS");
+
+/* captura a visão atual como imagem (canvas) */
+async function capturarView() {
+  const h2c = await comHtml2Canvas();
+  const alvo = document.querySelector(".view.on");
+  return h2c(alvo, { backgroundColor: "#eef1f2", scale: 2, useCORS: true });
+}
+
+async function exportImagem() {
+  try {
+    const canvas = await capturarView();
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url; a.download = arquivoNome("png"); a.click();
+  } catch (e) { alert("Não foi possível gerar a imagem: " + (e.message || e)); }
+}
+
+async function exportPPT() {
+  try {
+    const [Pptx, canvas] = [await comPptx(), await capturarView()];
+    const pptx = new Pptx();
+    pptx.defineLayout({ name: "W", width: 13.33, height: 7.5 });
+    pptx.layout = "W";
+    const s = pptx.addSlide();
+    s.background = { color: "FFFFFF" };
+    s.addText(`Book de Vendas BR Spices — ${NOMES_VIEW[viewAtiva()]}`,
+      { x: 0.4, y: 0.25, w: 12.5, h: 0.5, fontSize: 18, bold: true, color: "183A3F" });
+    s.addText(contextoTxt(), { x: 0.4, y: 0.72, w: 12.5, h: 0.3, fontSize: 10, color: "64737A" });
+    const rz = 6.4 / canvas.height, w = Math.min(12.5, canvas.width * rz);
+    s.addImage({ data: canvas.toDataURL("image/png"), x: (13.33 - w) / 2, y: 1.05, w, h: canvas.height * (w / canvas.width) });
+    await pptx.writeFile({ fileName: arquivoNome("pptx") });
+  } catch (e) { alert("Não foi possível gerar o PowerPoint: " + (e.message || e)); }
 }
 
 const XL = {
@@ -597,8 +665,6 @@ function xlTabela(ws, titulo, headers, rows, fmts, widths) {
 }
 
 async function exportExcel() {
-  const btn = $("btn-xls");
-  btn.disabled = true; btn.textContent = "Gerando…";
   try {
     const ExcelJS = await comExcelJS();
     const wb = new ExcelJS.Workbook();
@@ -705,8 +771,6 @@ async function exportExcel() {
     URL.revokeObjectURL(url);
   } catch (e) {
     alert("Não foi possível gerar o Excel: " + (e.message || e));
-  } finally {
-    btn.disabled = false; btn.textContent = "⬇ Excel";
   }
 }
 
@@ -723,13 +787,32 @@ document.addEventListener("DOMContentLoaded", () => {
   $("fg-voltar").addEventListener("click", () => mostrarLogin());
   $("who-senha").addEventListener("click", trocarSenha);
   document.querySelectorAll(".nav-i[data-v]").forEach((el) => el.addEventListener("click", () => trocarView(el.dataset.v)));
-  ["f-ger", "f-vend", "f-ano", "f-per"].forEach((id) => $(id)?.addEventListener("change", onFiltro));
+  ["f-ger", "f-vend", "f-ano"].forEach((id) => $(id)?.addEventListener("change", onFiltro));
   $("btn-reset").addEventListener("click", limparFiltros);
-  $("btn-pdf").addEventListener("click", exportPDF);
-  $("btn-xls").addEventListener("click", exportExcel);
   $("who-sair").addEventListener("click", sair);
+
+  // período (multi-seleção)
+  $("per-btn").addEventListener("click", (e) => { e.stopPropagation(); togglePerPanel(); });
+  $("per-panel").addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => togglePerPanel(false));
+  $("per-meses").addEventListener("click", (e) => {
+    const m = e.target.dataset.mes; if (!m) return;
+    const n = +m, sel = S.meses.includes(n);
+    aplicarPeriodo(sel ? S.meses.filter((x) => x !== n) : [...S.meses, n]);
+  });
+  document.querySelectorAll(".perquick button").forEach((b) =>
+    b.addEventListener("click", () => periodoRapido(b.dataset.q)));
+
+  // rodapé: atualizar + baixar
   $("btn-atualizar").addEventListener("click", () =>
     alert("Atualização automática entra na próxima fase.\nPor enquanto os dados são republicados pelo administrador."));
+  $("btn-download").addEventListener("click", (e) => { e.stopPropagation(); $("download-menu").classList.toggle("on"); });
+  $("download-menu").addEventListener("click", (e) => {
+    const dl = e.target.dataset.dl; if (!dl) return;
+    $("download-menu").classList.remove("on");
+    ({ pdf: exportPDF, xls: exportExcel, ppt: exportPPT, img: exportImagem }[dl] || (() => {}))();
+  });
+  document.addEventListener("click", () => $("download-menu").classList.remove("on"));
   $("busca-pos").addEventListener("input", (e) => { S.busca = e.target.value; S.nPos = 100; renderPositivados(linhas()); });
   $("busca-meta").addEventListener("input", (e) => { S.buscaMeta = e.target.value; S.nCli = 50; renderMetas(linhas(), mesesSel()); });
   $("pos-mais").addEventListener("click", () => { S.nPos += 200; renderPositivados(linhas()); });
