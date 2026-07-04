@@ -251,7 +251,7 @@ function limparFiltros() {
   if ($("f-vend")) $("f-vend").value = "";
   $("f-ano").value = "2026";
   S.fStatus = ""; S.busca = ""; S.buscaMeta = ""; FAT.busca = "";
-  $("busca-pos").value = ""; $("busca-meta").value = ""; $("busca-fat").value = "";
+  for (const id of ["busca-pos", "busca-meta", "busca-fat"]) if ($(id)) $(id).value = "";
   document.querySelectorAll(".fchip[data-st]").forEach((x) => x.classList.remove("on"));
   S.ano = 2026;
   S.meses = seq(1, mesFechado());
@@ -736,12 +736,9 @@ async function exportExcel() {
       }
       const { itens, tot, totalF26 } = calcFat();
       itens.sort((a, b) => b.m.f26 - a.m.f26);
-      const mesesH6 = hist6Fat(() => 0).map((p) => {
-        const n = MESES[p.m - 1];
-        return `${n[0].toUpperCase()}${n.slice(1)}/${String(p.y).slice(2)}`;
-      });
-      const cab = ["#", "Cliente", "2025", "2026", "26 vs 25", "% Repr", "Meta", "Realizado",
-                   "% Ating", "Gap", "Últ. compra", rotuloMesAtual(), "Carteira", ...mesesH6];
+      const mesesH6 = hist6Fat(() => 0).map((p) => rotuloMes(p.y, p.m));
+      const cab = ["#", "CLIENTE", "2025", "2026", "26 Vs 25", "% Repres.", "Meta", "Realizado",
+                   "% Ating.", "GAP", "Últ. Compra", rotuloMesAtual(), "Carteira", ...mesesH6];
       const fmts = [XL.num, null, XL.money, XL.money, XL.pct, XL.pct, XL.money, XL.money,
                     XL.pct, XL.money, null, XL.money, XL.money, ...mesesH6.map(() => XL.money)];
       const linha = (rk, nome, m, base) => [rk, nome, Math.round(m.f25), Math.round(m.f26), m.cr,
@@ -867,7 +864,8 @@ function somaMesesPr(arr, meses) {
 /* TODAS as colunas seguem o período selecionado; 2025 (ano ant.) e meta entram
    pro-rata no mês em andamento p/ comparação justa com o parcial de 2026 */
 function montarMetFat(f25, f26, meta, cart, ult, mesAtual, h6) {
-  return { f25, f26, cr: f25 > 0 ? (f26 - f25) / f25 : null,
+  // sem venda em 2025 e com venda em 2026 => crescimento de 100% (cliente novo)
+  return { f25, f26, cr: f25 > 0 ? (f26 - f25) / f25 : (f26 > 0 ? 1 : null),
            realizado: f26, anoAnt: f25, meta,
            ating: meta ? f26 / meta : null, gap: meta ? f26 - meta : null,
            cart, ult, mesAtual, h6 };
@@ -905,26 +903,24 @@ const farol = (x) => x == null ? "" : x >= 0.12 ? "cor-ok" : x >= 0 ? "cor-med" 
 
 const FAT_COLS = [
   { k: "rkg", t: "#", sort: false },
-  { k: "cliente", t: "Cliente", sort: "cliente" },
+  { k: "cliente", t: "CLIENTE", sort: "cliente" },
   { k: "f25", t: "2025", sort: "f25" },
   { k: "f26", t: "2026", sort: "f26" },
-  { k: "cr", t: "26 vs 25", sort: "cr" },
-  { k: "repr", t: "% Repr", sort: "repr" },
+  { k: "cr", t: "26 Vs 25", sort: "cr" },
+  { k: "repr", t: "% Repres.", sort: "repr" },
   { k: "meta", t: "Meta", sort: "meta" },
   { k: "realizado", t: "Realizado", sort: "realizado" },
-  { k: "ating", t: "% Ating", sort: "ating" },
-  { k: "gap", t: "Gap", sort: "gap" },
-  { k: "ult", t: "Últ. compra", sort: "ult" },
+  { k: "ating", t: "% Ating.", sort: "ating" },
+  { k: "gap", t: "GAP", sort: "gap" },
+  { k: "ult", t: "Últ. Compra", sort: "ult" },
   { k: "mesAtual", t: "", sort: "mesAtual" },   // rótulo dinâmico = mês em andamento
   { k: "cart", t: "Carteira", sort: "cart" },
-  { k: "h6", t: "Últimos 6 m", sort: false },
+  { k: "h6", t: "Últimos 6M", sort: false },
 ];
 const FAT_COLS_R = ["f25", "f26", "cr", "repr", "meta", "realizado", "ating", "gap", "mesAtual", "cart"];
-const rotuloMesAtual = () => {
-  const { ano, mes_atual } = S.data.periodo;
-  const m = MESES[mes_atual - 1];
-  return `${m[0].toUpperCase()}${m.slice(1)}/${String(ano).slice(2)}`;
-};
+/* meses sempre abreviados em minúsculas (jul/26) */
+const rotuloMes = (y, m) => `${MESES[m - 1]}/${String(y).slice(2)}`;
+const rotuloMesAtual = () => rotuloMes(S.data.periodo.ano, S.data.periodo.mes_atual);
 
 /* soma todas as fatias (vendedores) de uma mesma bandeira, unificando as UFs */
 function agregarPorBandeira(linhas) {
@@ -960,7 +956,7 @@ function calcFat() {
   // TOTAL GERAL (todos os clientes do escopo/busca, não só o top 20)
   const tot = { f25: 0, f26: 0, realizado: 0, anoAnt: 0, meta: 0, cart: 0, mesAtual: 0 };
   for (const x of itens) for (const k of Object.keys(tot)) tot[k] += x.m[k] || 0;
-  tot.cr = tot.f25 > 0 ? (tot.f26 - tot.f25) / tot.f25 : null;
+  tot.cr = tot.f25 > 0 ? (tot.f26 - tot.f25) / tot.f25 : (tot.f26 > 0 ? 1 : null);
   tot.ating = tot.meta ? tot.realizado / tot.meta : null;
   tot.gap = tot.meta ? tot.realizado - tot.meta : null;
   tot.ult = itens.reduce((s, x) => (x.m.ult && (!s || x.m.ult > s)) ? x.m.ult : s, null);
@@ -992,10 +988,7 @@ function desenharFat() {
     return `<th class="${FAT_COLS_R.includes(c.k) ? "r" : ""}${c.sort ? " ord" : ""}${ativo ? " ord-on" : ""}"${c.sort ? ` data-sort="${c.sort}"` : ""}>${rot}${seta}</th>`;
   }).join("");
   if (FAT.h6)
-    th += hist6Fat(() => 0).map((p) => {
-      const n = MESES[p.m - 1];
-      return `<th class="r">${n[0].toUpperCase()}${n.slice(1)}/${String(p.y).slice(2)}</th>`;
-    }).join("");
+    th += hist6Fat(() => 0).map((p) => `<th class="r">${rotuloMes(p.y, p.m)}</th>`).join("");
   const nCols = FAT_COLS.length + (FAT.h6 ? 6 : 0);
 
   let corpo = "";
@@ -1121,7 +1114,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.addEventListener("click", () => $("download-menu").classList.remove("on"));
   $("busca-pos").addEventListener("input", (e) => { S.busca = e.target.value; S.nPos = 100; renderPositivados(linhas()); });
-  $("busca-fat").addEventListener("input", (e) => { FAT.busca = e.target.value.trim(); if (FAT.cube) desenharFat(); });
+  if ($("busca-fat"))
+    $("busca-fat").addEventListener("input", (e) => { FAT.busca = e.target.value.trim(); if (FAT.cube) desenharFat(); });
   $("busca-meta").addEventListener("input", (e) => { S.buscaMeta = e.target.value; S.nCli = 50; renderMetas(linhas(), mesesSel()); });
   $("pos-mais").addEventListener("click", () => { S.nPos += 200; renderPositivados(linhas()); });
   $("metas-mais").addEventListener("click", () => { S.nCli += 100; renderMetas(linhas(), mesesSel()); });

@@ -247,6 +247,7 @@ td b{font-weight:650}
 .fat-tab tr.fat-total td:last-child{border-radius:0 0 8px 0}
 .fat-tab tr.fat-total .farolp{background:rgba(255,255,255,.15);color:#fff}
 .fat-tab tr.fat-cli{cursor:pointer}
+.fat-tab td:nth-child(2){white-space:nowrap}  /* nome do cliente nunca quebra linha */
 .fat-tab tr.fat-cli:hover td{background:#f0f6f6}
 .fat-tab tr.fat-cai td b{color:var(--bad)}
 .fat-tab .fat-exp{display:inline-block;width:12px;color:var(--soft)}
