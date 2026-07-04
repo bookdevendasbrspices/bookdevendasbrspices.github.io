@@ -286,6 +286,7 @@ def main():
 
     os.makedirs(DATA_DIR, exist_ok=True)
     arquivos_gerados = set()
+    kv_entries = {}          # chave de escopo -> payload aberto (p/ o cofre KV da Cloudflare)
     print(f"\nGerando {len(escopos)} arquivos por perfil...")
     for perfil, nome, filtro, extra in escopos:
         if filtro is None:
@@ -321,6 +322,15 @@ def main():
         if perfil == "gestor":
             payload["meta_empresa_mensal"] = meta_empresa
 
+        # versão p/ o cofre KV (Cloudflare): 1 entrada por escopo (visão completa é única)
+        kv_key = "gestor" if perfil == "gestor" else f"{perfil}|{nome}"
+        if kv_key not in kv_entries:
+            kv_payload = dict(payload)
+            kv_payload["escopo"] = {"perfil": perfil,
+                                    "nome": "VISÃO COMPLETA" if perfil == "gestor" else nome}
+            kv_entries[kv_key] = json.dumps(kv_payload, ensure_ascii=False,
+                                            separators=(",", ":"))
+
         chave = f"{perfil}|{nome}"
         if chave not in senhas:
             senhas[chave] = {"senha": gerar_senha(), "perfil": perfil, "nome": nome}
@@ -346,6 +356,13 @@ def main():
         if f.endswith(".enc.json") and f not in arquivos_gerados:
             os.remove(os.path.join(DATA_DIR, f))
             print(f"  removido órfão: data/{f}")
+
+    # arquivo de carga em lote p/ o KV (wrangler kv bulk put) — NUNCA commitado
+    kv_bulk = [{"key": "dados:" + k, "value": v} for k, v in sorted(kv_entries.items())]
+    with open(os.path.join(TOOLS_DIR, "kv_bulk.local.json"), "w", encoding="utf-8") as fh:
+        json.dump(kv_bulk, fh, ensure_ascii=False)
+    print(f"KV: {len(kv_bulk)} escopos em tools/kv_bulk.local.json "
+          f"({sum(len(e['value']) for e in kv_bulk)//1024} KB)")
 
     with open(SENHAS_JSON, "w", encoding="utf-8") as fh:
         json.dump(senhas, fh, ensure_ascii=False, indent=1)

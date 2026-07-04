@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Book de Vendas BR Spices</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="assets/img/book-de-vendas.svg">
+</head>
+<body>
+
+<!-- ================= PORTÃO (carregando / sem cadastro) ================= -->
+<div id="gate">
+  <div class="lbox">
+    <img class="lg" src="assets/img/book-de-vendas.svg" alt="Book de Vendas BR Spices">
+    <h1>Book de Vendas <b>BR Spices</b></h1>
+    <svg class="brush" viewBox="0 0 130 9"><path d="M2 6 Q33 1 65 4 T128 3" stroke="#F7E7D2" stroke-width="3.4" fill="none" stroke-linecap="round" opacity=".9"/></svg>
+    <p id="gate-msg">Abrindo seus dados…</p>
+    <div class="lerr" id="gate-err"></div>
+    <button id="gate-retry" style="display:none">Tentar de novo</button>
+    <div class="lnote">Acesso individual pelo seu e-mail corporativo.<br>
+      Problemas de acesso? Fale com o administrativo.</div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app">
+  <header class="top">
+    <div class="sp"></div>
+    <div class="hchip" id="hchip"></div>
+    <button class="hbtn" id="btn-atualizar">⟳ Atualizar dados</button>
+  </header>
+
+  <aside>
+    <div class="sbrand"><img src="assets/img/book-de-vendas.svg" alt="Book de Vendas BR Spices"></div>
+    <nav>
+      <div class="nsec">Visão comercial</div>
+      <div class="nav-i act" data-v="geral"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</div>
+      <div class="nav-i" data-v="metas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>Metas vs Realizado</div>
+      <div class="nav-i" data-v="posit"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5.5"/></svg>Positivados</div>
+      <div class="nav-i" data-v="rank"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M8 21V10M12 21V4M16 21v-7"/></svg>Rankings</div>
+      <div class="nsec" id="sec-admin" style="display:none">Administração</div>
+      <a class="nav-i" id="nav-admin" href="admin.html" style="display:none;text-decoration:none"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M19 8v6M16 11h6"/></svg>Gestão de usuários</a>
+      <div class="nsec">Próximas fases</div>
+      <div class="nav-i soon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8h5M17 12h5"/></svg>Clientes<span class="tag">EM BREVE</span></div>
+      <div class="nav-i soon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 7h16v13H4zM8 7V4h8v3"/></svg>Carteira / Pedidos<span class="tag">EM BREVE</span></div>
+      <div class="nav-i soon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M5 4h14v16l-3-2-2 2-2-2-2 2-2-2-3 2zM9 9h6M9 13h4"/></svg>Anotações<span class="tag">EM BREVE</span></div>
+    </nav>
+    <div class="who">
+      <b id="who-nome"></b>
+      <span id="who-email" style="display:block;font-size:10.5px"></span>
+      <span class="pill" id="who-pill"></span><br>
+      <a id="who-sair">Sair do painel</a>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div class="f"><label>Ano</label><select id="f-ano"></select></div>
+      <div class="f"><label>Período</label><select id="f-per"></select></div>
+      <div class="f" id="f-ger-wrap"><label>Gerente</label><select id="f-ger"></select></div>
+      <div class="f" id="f-vend-wrap"><label>Vendedor</label><select id="f-vend"></select></div>
+      <button class="reset" id="btn-reset">✕ Limpar filtros</button>
+      <button class="reset exp" id="btn-pdf" title="Gera PDF da visão atual (com os filtros aplicados)">⬇ PDF</button>
+      <button class="reset exp" id="btn-xls" title="Gera Excel da visão atual (com os filtros aplicados)">⬇ Excel</button>
+      <div class="chip" id="chip-filtro" style="display:none;background:var(--warn-bg);border-color:#eadcb4;color:#8a6d1d"></div>
+      <div class="chip" id="chip-periodo"></div>
+    </div>
+    <div id="print-head" style="display:none"></div>
+
+    <!-- ========== OVERVIEW ========== -->
+    <section class="view on" id="v-geral">
+      <h2 class="pg">Overview</h2>
+      <div class="sub">Resumo executivo — valores líquidos de devolução (regra oficial do Book). Use Ano/Período para YTD, meses e quarters.</div>
+      <div class="grid kpis" id="kpis"></div>
+      <div class="grid duo">
+        <div class="card">
+          <h3 id="evo-titulo"></h3>
+          <div id="evo-chart"></div>
+          <div class="leg" id="evo-leg"></div>
+        </div>
+        <div class="card">
+          <h3>Semáforo da base</h3>
+          <table><tbody id="semaforo"></tbody></table>
+          <div class="note" id="nota-risco"></div>
+          <h3 style="margin-top:18px">Top famílias</h3>
+          <ul class="rk" id="familias-mini"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== METAS ========== -->
+    <section class="view" id="v-metas">
+      <h2 class="pg">Metas vs Realizado</h2>
+      <div class="sub">Acompanhamento da meta — use os filtros acima para descer de gerente para vendedor e cliente.</div>
+      <div class="card">
+        <h3 id="metas-n1-titulo"></h3>
+        <div class="twrap"><table>
+          <thead><tr><th>Nome</th><th class="r">Meta</th><th class="r">Realizado</th><th>Progresso</th><th class="r">Ating.</th><th class="r">Gap</th></tr></thead>
+          <tbody id="metas-n1"></tbody>
+        </table></div>
+      </div>
+      <div class="gap14"></div>
+      <div class="card">
+        <h3>Maiores gaps por cliente <span class="rg">onde agir primeiro</span></h3>
+        <div class="tctl"><input id="busca-meta" placeholder="🔎 Buscar cliente…"></div>
+        <div class="twrap"><table>
+          <thead><tr><th>Cliente</th><th>Vendedor</th><th class="r">Meta</th><th class="r">Realizado</th><th class="r">Ating.</th><th class="r">Gap</th></tr></thead>
+          <tbody id="metas-gaps"></tbody>
+        </table></div>
+        <button class="more" id="metas-mais">Mostrar mais</button>
+      </div>
+    </section>
+
+    <!-- ========== POSITIVADOS ========== -->
+    <section class="view" id="v-posit">
+      <h2 class="pg">Positivados — semáforo de recência</h2>
+      <div class="sub">Quem está comprando e quem parou — com valor estimado em risco (média mensal × meses parado).</div>
+      <div class="card">
+        <div class="tctl">
+          <input id="busca-pos" placeholder="🔎 Buscar cliente…">
+          <span class="fchip" data-st="ok">Comprou no mês</span>
+          <span class="fchip" data-st="atencao">1 mês</span>
+          <span class="fchip" data-st="validar">2 meses</span>
+          <span class="fchip" data-st="acionar">3+ meses</span>
+          <span style="margin-left:auto;color:var(--soft);font-size:11.5px" id="pos-info"></span>
+        </div>
+        <div class="twrap"><table>
+          <thead id="pos-head"></thead>
+          <tbody id="pos-body"></tbody>
+        </table></div>
+        <button class="more" id="pos-mais">Mostrar mais</button>
+      </div>
+    </section>
+
+    <!-- ========== RANKINGS ========== -->
+    <section class="view" id="v-rank">
+      <h2 class="pg">Rankings</h2>
+      <div class="sub">Quem puxa o resultado — líquido de devolução, no período selecionado.</div>
+      <div class="grid trio">
+        <div class="card" id="rk-ger-card"><h3>Gerentes</h3><ul class="rk" id="rk-ger"></ul></div>
+        <div class="card" id="rk-vend-card"><h3>Vendedores</h3><ul class="rk" id="rk-vend"></ul></div>
+        <div class="card"><h3>Clientes</h3><ul class="rk" id="rk-cli"></ul></div>
+        <div class="card"><h3>Famílias</h3><ul class="rk" id="rk-fam"></ul>
+          <div class="note" id="rk-fam-nota" style="display:none">Famílias mostram o escopo total YTD (não seguem o filtro).</div></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="assets/js/app.js"></script>
+</body>
+</html>
