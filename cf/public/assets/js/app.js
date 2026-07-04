@@ -3,17 +3,26 @@
 "use strict";
 
 const S = { data: null, fGer: "", fVend: "", ano: 2026, meses: [],
-            nPos: 100, nCli: 50, fStatus: "", busca: "", buscaMeta: "", fracMes: 1 };
+            nPos: 100, nCli: 50, fStatus: "", busca: "", buscaMeta: "", fracMes: 1,
+            numModo: localStorage.getItem("bv_num") || "detalhado" };
 const $ = (id) => document.getElementById(id);
 const MESES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 const seq = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
 /* ---------------- formatação ---------------- */
 const fmtBR = (v, d = 0) => (v ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
-function fmtM(v) {  /* valores monetários sem o prefixo R$ (pedido do Fernando) */
+function fmtM(v) {  /* KPIs/resumo executivo: compacto, 1 casa, sem R$ */
   if (v == null) return "—";
   const a = Math.abs(v);
   if (a >= 1e6) return fmtBR(v / 1e6, 1) + "M";
+  if (a >= 1e3) return fmtBR(v / 1e3, 0) + "K";
+  return fmtBR(v, 0);
+}
+function fmtV(v) {  /* valores em TABELAS de cliente: detalhado (1,264M) ou completo (1.264.489) */
+  if (v == null) return "—";
+  if (S.numModo === "completo") return fmtBR(v, 0);
+  const a = Math.abs(v);
+  if (a >= 1e6) return fmtBR(v / 1e6, 3) + "M";
   if (a >= 1e3) return fmtBR(v / 1e3, 0) + "K";
   return fmtBR(v, 0);
 }
@@ -450,10 +459,10 @@ function linhaMetaTabela(o) {
   const w = at == null ? 0 : Math.min(100, at * 100);
   const gap = o.meta ? o.realizado - o.meta : null;
   return `<tr><td><b>${esc(nomeVend(o.nome))}</b></td>
-    <td class="r">${o.meta ? fmtM(o.meta) : "—"}</td><td class="r">${fmtM(o.realizado)}</td>
+    <td class="r">${o.meta ? fmtV(o.meta) : "—"}</td><td class="r">${fmtV(o.realizado)}</td>
     <td><div class="bar"><i class="${cls}" style="width:${w}%"></i></div></td>
     <td class="r" style="color:${cor}"><b>${at == null ? "—" : fmtPct(at, 0)}</b></td>
-    <td class="r" style="color:${gap == null ? "var(--soft)" : gap >= 0 ? "var(--ok)" : "var(--bad)"}">${gap == null ? "—" : (gap >= 0 ? "+" : "−") + fmtM(Math.abs(gap))}</td></tr>`;
+    <td class="r" style="color:${gap == null ? "var(--soft)" : gap >= 0 ? "var(--ok)" : "var(--bad)"}">${gap == null ? "—" : (gap >= 0 ? "+" : "−") + fmtV(Math.abs(gap))}</td></tr>`;
 }
 
 function renderMetas(rows, meses) {
@@ -481,9 +490,9 @@ function renderMetas(rows, meses) {
   $("metas-gaps").innerHTML = cli.slice(0, S.nCli).map((p) => {
     const at = p.metaP ? p.realP / p.metaP : null;
     return `<tr><td><b>${esc(p.cliente)}</b></td><td>${esc(nomeVend(p.vend))}</td>
-      <td class="r">${fmtM(p.metaP)}</td><td class="r">${fmtM(p.realP)}</td>
+      <td class="r">${fmtV(p.metaP)}</td><td class="r">${fmtV(p.realP)}</td>
       <td class="r" style="color:${at >= 1 ? "var(--ok)" : at >= 0.8 ? "var(--warn)" : "var(--bad)"}"><b>${fmtPct(at, 0)}</b></td>
-      <td class="r" style="color:${p.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${(p.gap >= 0 ? "+" : "−") + fmtM(Math.abs(p.gap))}</td></tr>`;
+      <td class="r" style="color:${p.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${(p.gap >= 0 ? "+" : "−") + fmtV(Math.abs(p.gap))}</td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Nenhum cliente com meta na seleção.</td></tr>';
   $("metas-mais").style.display = cli.length > S.nCli ? "" : "none";
 }
@@ -521,8 +530,8 @@ function renderPositivados(rows) {
     return `<tr><td><b>${esc(p.cliente)}</b><span style="display:block;font-size:10.5px;color:var(--soft)">${esc(subs)}</span></td>
       ${mostraVend ? `<td>${esc(nomeVend(p.vend))}</td>` : ""}
       <td>${fmtData(p.ult)}</td><td>${sparkHtml(p)}</td>
-      <td class="r">${fmtM(p.media)}</td>
-      <td class="r">${p.perdido > 0 ? `<b style="color:var(--bad)">${fmtM(p.perdido)}</b>` : '<span style="color:var(--soft)">—</span>'}</td>
+      <td class="r">${fmtV(p.media)}</td>
+      <td class="r">${p.perdido > 0 ? `<b style="color:var(--bad)">${fmtV(p.perdido)}</b>` : '<span style="color:var(--soft)">—</span>'}</td>
       <td><span class="pill ${st.pill}">${stTxt}</span></td></tr>`;
   }).join("") || `<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>`;
   $("pos-mais").style.display = r.length > S.nPos ? "" : "none";
@@ -539,12 +548,12 @@ function renderRankings(rows, meses) {
   const d = S.data;
   if (d.escopo.perfil !== "vendedor") {
     const v = agrupar(rows, "vend", meses).slice(0, 10);
-    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, nomeVend(o.nome), null, fmtM(o.realizado))).join("");
+    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, nomeVend(o.nome), null, fmtV(o.realizado))).join("");
     $("rk-vend-card").style.display = "";
   } else $("rk-vend-card").style.display = "none";
   if (d.escopo.perfil === "gestor" && !S.fGer) {
     const g = agrupar(rows, "ger", meses).slice(0, 10);
-    $("rk-ger").innerHTML = g.map((o, i) => liRank(i, o.nome, null, fmtM(o.realizado))).join("");
+    $("rk-ger").innerHTML = g.map((o, i) => liRank(i, o.nome, null, fmtV(o.realizado))).join("");
     $("rk-ger-card").style.display = "";
   } else $("rk-ger-card").style.display = "none";
   const c = rows.map((p) => {
@@ -552,9 +561,9 @@ function renderRankings(rows, meses) {
     if (a) for (const m of meses) f += a[m - 1] || 0;
     return { p, f };
   }).sort((x, y) => y.f - x.f).slice(0, 10);
-  $("rk-cli").innerHTML = c.map(({ p, f }, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtM(f))).join("");
+  $("rk-cli").innerHTML = c.map(({ p, f }, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtV(f))).join("");
   const fm = (d.familias || []).slice(0, 10);
-  $("rk-fam").innerHTML = fm.map((o, i) => liRank(i, o.nome, null, fmtM(o.fat))).join("");
+  $("rk-fam").innerHTML = fm.map((o, i) => liRank(i, o.nome, null, fmtV(o.fat))).join("");
   $("rk-fam-nota").style.display = (filtrado() || S.ano !== 2026) ? "" : "none";
 }
 
@@ -938,8 +947,8 @@ function celFat(m, base, uf) {
   const pct = (x) => x == null ? "—" : (x >= 0 ? "" : "−") + fmtBR(Math.abs(x) * 100, 0) + "%";
   const repr = uf ? m.f26 / (base || 1) : m.f26 / (base || 1);
   const cols = [
-    `<td class="r">${fmtM(m.f25)}</td>`,
-    `<td class="r"><b>${fmtM(m.f26)}</b></td>`,
+    `<td class="r">${fmtV(m.f25)}</td>`,
+    `<td class="r"><b>${fmtV(m.f26)}</b></td>`,
     `<td class="r"><span class="farolp ${farol(m.cr)}">${pct(m.cr)}</span></td>`,
     `<td class="r">${fmtBR(repr * 100, 1)}%</td>`,
     `<td class="r">${fmtBR(m.v25, 0)}</td>`,
@@ -948,11 +957,11 @@ function celFat(m, base, uf) {
   ];
   if (uf) return cols.join("") + '<td></td><td></td><td></td><td></td><td></td>';
   return cols.join("") +
-    `<td class="r">${m.meta ? fmtM(m.meta) : "—"}</td>` +
-    `<td class="r">${fmtM(m.realizado)}</td>` +
+    `<td class="r">${m.meta ? fmtV(m.meta) : "—"}</td>` +
+    `<td class="r">${fmtV(m.realizado)}</td>` +
     `<td class="r">${m.ating == null ? "—" : fmtBR(m.ating * 100, 0) + "%"}</td>` +
-    `<td class="r" style="color:${m.gap == null ? "var(--soft)" : m.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${m.gap == null ? "—" : (m.gap >= 0 ? "+" : "−") + fmtM(Math.abs(m.gap))}</td>` +
-    `<td class="r">${fmtM(m.anoAnt)}</td>`;
+    `<td class="r" style="color:${m.gap == null ? "var(--soft)" : m.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${m.gap == null ? "—" : (m.gap >= 0 ? "+" : "−") + fmtV(Math.abs(m.gap))}</td>` +
+    `<td class="r">${fmtV(m.anoAnt)}</td>`;
 }
 function renderVol() {
   $("vol-conteudo").innerHTML = emConstrucao("Volume / Mix — visão “batalha naval”",
@@ -983,7 +992,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".perquick button").forEach((b) =>
     b.addEventListener("click", () => periodoRapido(b.dataset.q)));
 
-  // rodapé: atualizar + baixar
+  // rodapé: modo de números + atualizar + baixar
+  const rotuloNum = () => $("btn-num").textContent =
+    S.numModo === "completo" ? "🔢 Nº: Completo" : "🔢 Nº: Detalhado";
+  rotuloNum();
+  $("btn-num").addEventListener("click", () => {
+    S.numModo = S.numModo === "completo" ? "detalhado" : "completo";
+    localStorage.setItem("bv_num", S.numModo);
+    rotuloNum();
+    if (S.data) renderAll();
+  });
   $("btn-atualizar").addEventListener("click", () =>
     alert("Atualização automática entra na próxima fase.\nPor enquanto os dados são republicados pelo administrador."));
   $("btn-download").addEventListener("click", (e) => { e.stopPropagation(); $("download-menu").classList.toggle("on"); });
