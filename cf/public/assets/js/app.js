@@ -249,8 +249,8 @@ function limparFiltros() {
   if ($("f-ger")) $("f-ger").value = "";
   if ($("f-vend")) $("f-vend").value = "";
   $("f-ano").value = "2026";
-  S.fStatus = ""; S.busca = ""; S.buscaMeta = "";
-  $("busca-pos").value = ""; $("busca-meta").value = "";
+  S.fStatus = ""; S.busca = ""; S.buscaMeta = ""; FAT.busca = "";
+  $("busca-pos").value = ""; $("busca-meta").value = ""; $("busca-fat").value = "";
   document.querySelectorAll(".fchip[data-st]").forEach((x) => x.classList.remove("on"));
   S.ano = 2026;
   S.meses = seq(1, mesFechado());
@@ -735,18 +735,19 @@ async function exportExcel() {
       }
       const { itens, tot, totalF26 } = calcFat();
       itens.sort((a, b) => b.m.f26 - a.m.f26);
-      const cab = ["#", "Cliente", "2025", "2026", "26 vs 25", "% Repr", "Vol 2025", "Vol 2026",
-                   "26 vs 25 cx", "Meta", "Realizado", "% Ating", "GAP", "Ano ant."];
-      const fmts = [XL.num, null, XL.money, XL.money, XL.pct, XL.pct, XL.num, XL.num,
-                    XL.pct, XL.money, XL.money, XL.pct, XL.money, XL.money];
+      const mesesH7 = hist7Fat(() => 0).map((p) => `${MESES[p.m - 1]}/${String(p.y).slice(2)}`);
+      const cab = ["#", "Cliente", "2025", "2026", "26 vs 25", "% Repr", "Meta", "Realizado",
+                   "% Ating", "GAP", "Carteira", "Últ. compra", ...mesesH7];
+      const fmts = [XL.num, null, XL.money, XL.money, XL.pct, XL.pct, XL.money, XL.money,
+                    XL.pct, XL.money, XL.money, null, ...mesesH7.map(() => XL.money)];
       const linha = (rk, nome, m, base) => [rk, nome, Math.round(m.f25), Math.round(m.f26), m.cr,
-        m.f26 / (base || 1), Math.round(m.v25), Math.round(m.v26), m.crv,
-        m.meta ? Math.round(m.meta) : null, Math.round(m.realizado), m.ating,
-        m.gap == null ? null : Math.round(m.gap), Math.round(m.anoAnt)];
-      xlTabela(ws, `Faturamento por cliente — período: ${rotuloPer()}`,
+        m.f26 / (base || 1), m.meta ? Math.round(m.meta) : null, Math.round(m.realizado), m.ating,
+        m.gap == null ? null : Math.round(m.gap), m.cart ? Math.round(m.cart) : null,
+        m.ult ? fmtData(m.ult) : "—", ...(m.h7 || []).map((p) => Math.round(p.v))];
+      xlTabela(ws, `Faturamento por cliente — período: ${rotuloPer()} · últimos 7 meses do recente p/ o antigo`,
         cab, [...itens.map((x, i) => linha(i + 1, x.c.cliente, x.m, totalF26)),
               linha(null, `TOTAL GERAL (${itens.length} clientes)`, tot, totalF26)],
-        fmts, [5, 36, 14, 14, 10, 9, 11, 11, 11, 13, 13, 9, 13, 14]);
+        fmts, [5, 36, 14, 14, 10, 9, 13, 13, 9, 13, 12, 11, ...mesesH7.map(() => 11)]);
       const ufRows = [];
       itens.slice(0, 20).forEach((x, i) => {
         [...x.c.ufs].map((u) => ({ u, m: metricasUF(u) })).sort((a, b) => b.m.f26 - a.m.f26)
@@ -836,7 +837,7 @@ function emConstrucao(titulo, itens) {
   </div>`;
 }
 /* ---------------- Faturamento por cliente (drill-down UF, Top 20, ordenável) ---------------- */
-const FAT = { cube: null, ordCol: "f26", ordDir: -1, abertos: {} };
+const FAT = { cube: null, ordCol: "f26", ordDir: -1, abertos: {}, busca: "", h7: false };
 
 async function renderFat() {
   const el = $("fat-conteudo");
@@ -860,21 +861,36 @@ function somaMesesPr(arr, meses) {
 
 /* TODAS as colunas seguem o período selecionado; 2025 (ano ant.) e meta entram
    pro-rata no mês em andamento p/ comparação justa com o parcial de 2026 */
-function montarMetFat(f25, f26, v25, v26, meta) {
+function montarMetFat(f25, f26, meta, cart, ult, h7) {
   return { f25, f26, cr: f25 > 0 ? (f26 - f25) / f25 : null,
-           v25, v26, crv: v25 > 0 ? (v26 - v25) / v25 : null,
            realizado: f26, anoAnt: f25, meta,
-           ating: meta ? f26 / meta : null, gap: meta ? f26 - meta : null };
+           ating: meta ? f26 / meta : null, gap: meta ? f26 - meta : null,
+           cart, ult, h7 };
 }
+/* mês atual + 6 meses fechados, do mais recente p/ o mais antigo (recente à esquerda) */
+function hist7Fat(valorMes) {
+  const { ano, mes_atual } = S.data.periodo;
+  const out = [];
+  for (let k = 0; k <= 6; k++) {
+    const idx = ano * 12 + mes_atual - 1 - k;
+    out.push({ y: Math.floor(idx / 12), m: (idx % 12) + 1 });
+  }
+  return out.map((p) => ({ ...p, v: valorMes(p.y, p.m) }));
+}
+const mesUF = (u, y, m) => ((y === 2026 ? u.m26 : y === 2025 ? u.m25 : null) || [])[m - 1] || 0;
+
 function metricasCliente(c) {
   const meses = mesesSel();
   const soma = (k, pr) => c.ufs.reduce((s, u) => s + (pr ? somaMesesPr(u[k], meses) : somaMeses(u[k], meses)), 0);
-  return montarMetFat(soma("m25", 1), soma("m26"), soma("q25", 1), soma("q26"), somaMesesPr(c.meta, meses));
+  const cart = c.ufs.reduce((s, u) => s + (u.cart || 0), 0);
+  const ult = c.ufs.reduce((s, u) => (u.ult && (!s || u.ult > s)) ? u.ult : s, null);
+  const h7 = hist7Fat((y, m) => c.ufs.reduce((s, u) => s + mesUF(u, y, m), 0));
+  return montarMetFat(soma("m25", 1), soma("m26"), somaMesesPr(c.meta, meses), cart, ult, h7);
 }
 function metricasUF(u) {
   const meses = mesesSel();
-  return montarMetFat(somaMesesPr(u.m25, meses), somaMeses(u.m26, meses),
-                      somaMesesPr(u.q25, meses), somaMeses(u.q26, meses), somaMesesPr(u.meta || [], meses));
+  return montarMetFat(somaMesesPr(u.m25, meses), somaMeses(u.m26, meses), somaMesesPr(u.meta || [], meses),
+                      u.cart || 0, u.ult || null, hist7Fat((y, m) => mesUF(u, y, m)));
 }
 
 const farol = (x) => x == null ? "" : x >= 0.12 ? "cor-ok" : x >= 0 ? "cor-med" : "cor-bad";
@@ -886,15 +902,15 @@ const FAT_COLS = [
   { k: "f26", t: "2026", sort: "f26" },
   { k: "cr", t: "26 vs 25", sort: "cr" },
   { k: "repr", t: "% Repr", sort: "repr" },
-  { k: "v25", t: "Vol 2025", sort: "v25" },
-  { k: "v26", t: "Vol 2026", sort: "v26" },
-  { k: "crv", t: "26 vs 25 cx", sort: "crv" },
   { k: "meta", t: "Meta", sort: "meta" },
   { k: "realizado", t: "Realizado", sort: "realizado" },
   { k: "ating", t: "% Ating", sort: "ating" },
   { k: "gap", t: "GAP", sort: "gap" },
-  { k: "anoAnt", t: "Ano ant.", sort: "anoAnt" },
+  { k: "cart", t: "Carteira", sort: "cart" },
+  { k: "ult", t: "Últ. compra", sort: "ult" },
+  { k: "h7", t: "Últimos 7 m", sort: false },
 ];
+const FAT_COLS_R = ["f25", "f26", "cr", "repr", "meta", "realizado", "ating", "gap", "cart"];
 
 /* soma todas as fatias (vendedores) de uma mesma bandeira, unificando as UFs */
 function agregarPorBandeira(linhas) {
@@ -904,8 +920,11 @@ function agregarPorBandeira(linhas) {
     c.meta.forEach((v, i) => g.meta[i] += v || 0);
     for (const u of c.ufs) {
       const t = (g.ufs[u.uf] ??= { uf: u.uf, m25: Array(12).fill(0), m26: Array(12).fill(0),
-                                    q25: Array(12).fill(0), q26: Array(12).fill(0), meta: Array(12).fill(0) });
+                                    q25: Array(12).fill(0), q26: Array(12).fill(0), meta: Array(12).fill(0),
+                                    cart: 0, ult: null });
       for (const k of ["m25", "m26", "q25", "q26", "meta"]) (u[k] || []).forEach((v, i) => t[k][i] += v || 0);
+      t.cart += u.cart || 0;
+      if (u.ult && (!t.ult || u.ult > t.ult)) t.ult = u.ult;
     }
   }
   return Object.values(map).map((g) => ({ cliente: g.cliente, meta: g.meta, ufs: Object.values(g.ufs) }));
@@ -917,16 +936,23 @@ function calcFat() {
   if (S.fGer) linhas = linhas.filter((c) => c.ger === S.fGer);
   if (S.fVend) linhas = linhas.filter((c) => c.vend === S.fVend);
   linhas = agregarPorBandeira(linhas);
+  if (FAT.busca) {
+    const b = FAT.busca.toLowerCase();
+    linhas = linhas.filter((c) => c.cliente.toLowerCase().includes(b));
+  }
   const itens = linhas.map((c) => ({ c, m: metricasCliente(c) }));
   const totalF26 = itens.reduce((s, x) => s + x.m.f26, 0) || 1;
 
-  // TOTAL GERAL (todos os clientes do escopo, não só o top 20)
-  const tot = { f25: 0, f26: 0, v25: 0, v26: 0, realizado: 0, anoAnt: 0, meta: 0 };
+  // TOTAL GERAL (todos os clientes do escopo/busca, não só o top 20)
+  const tot = { f25: 0, f26: 0, realizado: 0, anoAnt: 0, meta: 0, cart: 0 };
   for (const x of itens) for (const k of Object.keys(tot)) tot[k] += x.m[k] || 0;
   tot.cr = tot.f25 > 0 ? (tot.f26 - tot.f25) / tot.f25 : null;
-  tot.crv = tot.v25 > 0 ? (tot.v26 - tot.v25) / tot.v25 : null;
   tot.ating = tot.meta ? tot.realizado / tot.meta : null;
   tot.gap = tot.meta ? tot.realizado - tot.meta : null;
+  tot.ult = itens.reduce((s, x) => (x.m.ult && (!s || x.m.ult > s)) ? x.m.ult : s, null);
+  tot.h7 = hist7Fat((y, m) => itens.reduce((s, x) => {
+    const p = x.m.h7.find((q) => q.y === y && q.m === m); return s + (p ? p.v : 0);
+  }, 0));
   return { itens, tot, totalF26 };
 }
 
@@ -936,17 +962,23 @@ function desenharFat() {
 
   // ordena e pega Top 20
   const col = FAT.ordCol, dir = FAT.ordDir;
-  const val = (x) => col === "cliente" ? x.c.cliente : col === "repr" ? x.m.f26 : (x.m[col] ?? -Infinity);
+  const val = (x) => col === "cliente" ? x.c.cliente : col === "repr" ? x.m.f26
+    : col === "ult" ? (x.m.ult ? Date.parse(x.m.ult) : -Infinity) : (x.m[col] ?? -Infinity);
   itens.sort((a, b) => col === "cliente"
     ? dir * String(val(a)).localeCompare(String(val(b)), "pt-BR")
     : dir * (val(a) - val(b)));
   itens = itens.slice(0, 20);
 
-  const th = FAT_COLS.map((c) => {
+  let th = FAT_COLS.map((c) => {
+    if (c.k === "h7")
+      return `<th id="fat-h7th" style="cursor:pointer" title="Clique para ${FAT.h7 ? "recolher" : "abrir"} os valores mês a mês">${c.t} ${FAT.h7 ? "◂" : "▸"}</th>`;
     const ativo = c.sort === FAT.ordCol;
     const seta = ativo ? (FAT.ordDir < 0 ? " ▼" : " ▲") : "";
-    return `<th class="${["f25", "f26", "cr", "repr", "v25", "v26", "crv", "meta", "realizado", "ating", "gap", "anoAnt"].includes(c.k) ? "r" : ""}${c.sort ? " ord" : ""}${ativo ? " ord-on" : ""}"${c.sort ? ` data-sort="${c.sort}"` : ""}>${c.t}${seta}</th>`;
+    return `<th class="${FAT_COLS_R.includes(c.k) ? "r" : ""}${c.sort ? " ord" : ""}${ativo ? " ord-on" : ""}"${c.sort ? ` data-sort="${c.sort}"` : ""}>${c.t}${seta}</th>`;
   }).join("");
+  if (FAT.h7)
+    th += hist7Fat(() => 0).map((p) => `<th class="r">${MESES[p.m - 1]}/${String(p.y).slice(2)}</th>`).join("");
+  const nCols = FAT_COLS.length + (FAT.h7 ? 7 : 0);
 
   let corpo = "";
   itens.forEach((x, i) => {
@@ -971,15 +1003,18 @@ function desenharFat() {
     <td><b>TOTAL GERAL</b> <span style="opacity:.75;font-weight:400">· ${nCli} clientes</span></td>
     ${celFat(tot, totalF26)}</tr>`;
 
+  $("fat-info").textContent =
+    `${FAT.busca ? `${nCli} encontrado(s)` : "Top 20"} · ${rotuloPer()} · clique num cliente para abrir por UF · clique no cabeçalho para ordenar`;
   $("fat-conteudo").innerHTML =
-    `<div class="tctl"><span style="color:var(--soft);font-size:11.5px">Top 20 · ${rotuloPer()} · clique num cliente para abrir por UF · clique no cabeçalho para ordenar</span></div>
-     <div class="twrap"><table class="fat-tab"><thead><tr>${th}</tr></thead><tbody>${corpo || '<tr><td colspan="14" class="empty">Sem dados.</td></tr>'}</tbody></table></div>`;
+    `<div class="twrap"><table class="fat-tab"><thead><tr>${th}</tr></thead><tbody>${corpo || `<tr><td colspan="${nCols}" class="empty">Nenhum cliente encontrado.</td></tr>`}</tbody></table></div>`;
 
   document.querySelectorAll(".fat-tab th.ord").forEach((h) => h.addEventListener("click", () => {
     const s = h.dataset.sort;
     if (FAT.ordCol === s) FAT.ordDir *= -1; else { FAT.ordCol = s; FAT.ordDir = s === "cliente" ? 1 : -1; }
     desenharFat();
   }));
+  const h7th = $("fat-h7th");
+  if (h7th) h7th.addEventListener("click", () => { FAT.h7 = !FAT.h7; desenharFat(); });
   document.querySelectorAll(".fat-tab tr.fat-cli").forEach((r) => r.addEventListener("click", () => {
     const k = r.dataset.cli;
     FAT.abertos[k] = !FAT.abertos[k];
@@ -987,24 +1022,36 @@ function desenharFat() {
   }));
 }
 
-function celFat(m, base, uf) {
+/* dias sem compra em relação à data de atualização dos dados */
+function diasSemCompra(ult) {
+  if (!ult) return null;
+  return Math.round((Date.parse(S.data.atualizado_ate) - Date.parse(ult)) / 864e5);
+}
+function sparkFat(h7) {
+  const vals = (h7 || []).map((p) => Math.max(0, p.v || 0));
+  const max = Math.max(1, ...vals);
+  return '<div class="spark">' + vals.map((v) =>
+    v > 0 ? `<i style="height:${Math.max(3, Math.round((v / max) * 18))}px"></i>` : '<i class="z"></i>').join("") + "</div>";
+}
+
+function celFat(m, base) {
   const pct = (x) => x == null ? "—" : (x >= 0 ? "" : "−") + fmtBR(Math.abs(x) * 100, 0) + "%";
-  const repr = uf ? m.f26 / (base || 1) : m.f26 / (base || 1);
-  const cols = [
-    `<td class="r">${fmtV(m.f25)}</td>`,
-    `<td class="r"><b>${fmtV(m.f26)}</b></td>`,
-    `<td class="r"><span class="farolp ${farol(m.cr)}">${pct(m.cr)}</span></td>`,
-    `<td class="r">${fmtBR(repr * 100, 1)}%</td>`,
-    `<td class="r">${fmtBR(m.v25, 0)}</td>`,
-    `<td class="r">${fmtBR(m.v26, 0)}</td>`,
-    `<td class="r"><span class="farolp ${farol(m.crv)}">${pct(m.crv)}</span></td>`,
-  ];
-  return cols.join("") +
+  const repr = m.f26 / (base || 1);
+  const dias = diasSemCompra(m.ult);
+  let cels =
+    `<td class="r">${fmtV(m.f25)}</td>` +
+    `<td class="r"><b>${fmtV(m.f26)}</b></td>` +
+    `<td class="r"><span class="farolp ${farol(m.cr)}">${pct(m.cr)}</span></td>` +
+    `<td class="r">${fmtBR(repr * 100, 1)}%</td>` +
     `<td class="r">${m.meta ? fmtV(m.meta) : "—"}</td>` +
     `<td class="r">${fmtV(m.realizado)}</td>` +
     `<td class="r">${m.ating == null ? "—" : fmtBR(m.ating * 100, 0) + "%"}</td>` +
     `<td class="r" style="color:${m.gap == null ? "var(--soft)" : m.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${m.gap == null ? "—" : (m.gap >= 0 ? "+" : "−") + fmtV(Math.abs(m.gap))}</td>` +
-    `<td class="r">${fmtV(m.anoAnt)}</td>`;
+    `<td class="r">${m.cart ? fmtV(m.cart) : "—"}</td>` +
+    `<td${dias != null && dias > 60 ? ' style="color:var(--bad);font-weight:700"' : ""}>${fmtData(m.ult)}</td>` +
+    `<td>${sparkFat(m.h7)}</td>`;
+  if (FAT.h7) cels += (m.h7 || []).map((p) => `<td class="r">${fmtV(p.v)}</td>`).join("");
+  return cels;
 }
 function renderVol() {
   $("vol-conteudo").innerHTML = emConstrucao("Volume / Mix — visão “batalha naval”",
@@ -1055,6 +1102,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.addEventListener("click", () => $("download-menu").classList.remove("on"));
   $("busca-pos").addEventListener("input", (e) => { S.busca = e.target.value; S.nPos = 100; renderPositivados(linhas()); });
+  $("busca-fat").addEventListener("input", (e) => { FAT.busca = e.target.value.trim(); if (FAT.cube) desenharFat(); });
   $("busca-meta").addEventListener("input", (e) => { S.buscaMeta = e.target.value; S.nCli = 50; renderMetas(linhas(), mesesSel()); });
   $("pos-mais").addEventListener("click", () => { S.nPos += 200; renderPositivados(linhas()); });
   $("metas-mais").addEventListener("click", () => { S.nCli += 100; renderMetas(linhas(), mesesSel()); });

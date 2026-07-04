@@ -182,7 +182,13 @@
     <section class="view" id="v-fat">
       <h2 class="pg">Faturamento por cliente</h2>
       <div class="sub">Top 20 do maior para o menor — abra o cliente para ver por UF. Todas as colunas seguem o período selecionado (YTD = até o mês fechado; incluindo o mês em andamento, 2025 e meta entram na proporção dos dias decorridos). Clientes caindo vs. ano anterior em vermelho.</div>
-      <div class="card"><div id="fat-conteudo"><div class="empty">Carregando…</div></div></div>
+      <div class="card">
+        <div class="tctl">
+          <input id="busca-fat" placeholder="🔎 Buscar cliente…">
+          <span id="fat-info" style="color:var(--soft);font-size:11.5px"></span>
+        </div>
+        <div id="fat-conteudo"><div class="empty">Carregando…</div></div>
+      </div>
     </section>
 
     <!-- ========== VOLUME / MIX (batalha naval) ========== -->

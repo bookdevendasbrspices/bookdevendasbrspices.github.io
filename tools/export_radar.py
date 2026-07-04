@@ -206,7 +206,8 @@ def main():
 
     uf_de = lambda cnpj: (dim.get(cnpj, (None, None, None, ""))[3] or "—")
     novo_ud = lambda: {"m25": [0.0] * 12, "m26": [0.0] * 12,
-                       "q25": [0.0] * 12, "q26": [0.0] * 12, "meta": [0.0] * 12}
+                       "q25": [0.0] * 12, "q26": [0.0] * 12, "meta": [0.0] * 12,
+                       "cart": 0.0, "ult": None}
 
     groups = {}
 
@@ -246,6 +247,13 @@ def main():
         g = grupo(cnpj)
         if g["ult"] is None or ts > g["ult"]:
             g["ult"] = ts
+        ud = g["uf_det"].setdefault(uf_de(cnpj), novo_ud())
+        if ud["ult"] is None or ts > ud["ult"]:
+            ud["ult"] = ts
+    # pedidos em carteira (pendentes de faturar) somados na UF do CNPJ
+    for cnpj, v in cart.groupby("CNPJ_N")["TOTAL"].sum().items():
+        g = grupo(cnpj)
+        g["uf_det"].setdefault(uf_de(cnpj), novo_ud())["cart"] += float(v)
 
     # ---- registros finais por cliente-bandeira
     idx_atual = ano_atual * 12 + mes_atual
@@ -276,7 +284,9 @@ def main():
         ufs_det = [{"uf": u,
                     "m25": [round(x) for x in d["m25"]], "m26": [round(x) for x in d["m26"]],
                     "q25": [round(x) for x in d["q25"]], "q26": [round(x) for x in d["q26"]],
-                    "meta": [round(x) for x in d["meta"]]}
+                    "meta": [round(x) for x in d["meta"]],
+                    "cart": round(d["cart"]),
+                    "ult": d["ult"].strftime("%Y-%m-%d") if d["ult"] is not None else None}
                    for u, d in sorted(g["uf_det"].items(), key=lambda kv: -sum(kv[1]["m26"]))]
         fatrec = {"cliente": g["cliente"], "vend": g["vend"], "ger": g["ger"],
                   "meta": [round(v) for v in g["meta"]], "ufs": ufs_det}
