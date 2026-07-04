@@ -55,7 +55,6 @@
           <div class="nav-i" data-v="vol"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>Volume / Mix</div>
           <div class="nav-i" data-v="metas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>Metas vs Realizado</div>
           <div class="nav-i" data-v="posit"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5.5"/></svg>Positivados</div>
-          <div class="nav-i" data-v="rank"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M8 21V10M12 21V4M16 21v-7"/></svg>Rankings</div>
         </div>
       </div>
       <div class="nsec" id="sec-admin" style="display:none">Administração</div>
@@ -103,19 +102,37 @@
     <!-- ========== DASHBOARD ========== -->
     <section class="view on" id="v-geral">
       <h2 class="pg">Dashboard</h2>
-      <div class="sub">Resumo executivo — valores líquidos de devolução (regra oficial do Book). Use Ano/Período para YTD, meses e quarters.</div>
+      <div class="sub">Resumo executivo dinâmico — clique num gerente ou vendedor para filtrar a página inteira (clique de novo para desfazer); clique num cliente para abrir o detalhamento. Valores líquidos de devolução (regra oficial do Book).</div>
       <div class="grid kpis" id="kpis"></div>
+      <div class="card">
+        <h3 id="evo-titulo"></h3>
+        <div id="evo-chart"></div>
+        <div class="leg" id="evo-leg"></div>
+      </div>
+      <div class="gap14"></div>
+      <div class="card" id="card-dash-cli">
+        <h3>Top 20 clientes <span class="rg">clique para abrir no Faturamento</span></h3>
+        <div class="twrap" id="dash-cli"></div>
+      </div>
+      <div class="gap14"></div>
+      <div class="card" id="card-dash-ger">
+        <h3>Gerentes <span class="rg">clique para filtrar a página</span></h3>
+        <div class="twrap" id="dash-ger"></div>
+      </div>
+      <div class="gap14"></div>
+      <div class="card" id="card-dash-vend">
+        <h3>Top 20 vendedores <span class="rg">clique para filtrar a página</span></h3>
+        <div class="twrap" id="dash-vend"></div>
+      </div>
+      <div class="gap14"></div>
       <div class="grid duo">
-        <div class="card">
-          <h3 id="evo-titulo"></h3>
-          <div id="evo-chart"></div>
-          <div class="leg" id="evo-leg"></div>
-        </div>
         <div class="card">
           <h3>Semáforo da base</h3>
           <table><tbody id="semaforo"></tbody></table>
           <div class="note" id="nota-risco"></div>
-          <h3 style="margin-top:18px">Top famílias</h3>
+        </div>
+        <div class="card">
+          <h3>Top famílias <span class="rg">escopo total YTD</span></h3>
           <ul class="rk" id="familias-mini"></ul>
         </div>
       </div>
@@ -162,19 +179,6 @@
           <tbody id="pos-body"></tbody>
         </table></div>
         <button class="more" id="pos-mais">Mostrar mais</button>
-      </div>
-    </section>
-
-    <!-- ========== RANKINGS ========== -->
-    <section class="view" id="v-rank">
-      <h2 class="pg">Rankings</h2>
-      <div class="sub">Quem puxa o resultado — líquido de devolução, no período selecionado.</div>
-      <div class="grid trio">
-        <div class="card" id="rk-ger-card"><h3>Gerentes</h3><ul class="rk" id="rk-ger"></ul></div>
-        <div class="card" id="rk-vend-card"><h3>Vendedores</h3><ul class="rk" id="rk-vend"></ul></div>
-        <div class="card"><h3>Clientes</h3><ul class="rk" id="rk-cli"></ul></div>
-        <div class="card"><h3>Famílias</h3><ul class="rk" id="rk-fam"></ul>
-          <div class="note" id="rk-fam-nota" style="display:none">Famílias mostram o escopo total YTD (não seguem o filtro).</div></div>
       </div>
     </section>
 

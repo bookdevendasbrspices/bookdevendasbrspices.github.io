@@ -275,12 +275,27 @@ function renderAll() {
   renderChips();
   renderKpis(rows, meses);
   renderEvolucao(rows);
+  renderDashRank();
   renderSemaforo(rows);
   renderFamilias();
   renderMetas(rows, meses);
   renderPositivados(rows);
-  renderRankings(rows, meses);
   if (FAT.cube && $("v-fat").classList.contains("on")) desenharFat();
+}
+
+/* cross-filter: clicar num gerente/vendedor filtra a página toda; clicar de novo desfaz */
+function filtrarGer(g) {
+  S.fGer = S.fGer === g ? "" : g;
+  if ($("f-ger")) $("f-ger").value = S.fGer;
+  atualizarVendSelect();
+  S.nPos = 100; S.nCli = 50;
+  renderAll();
+}
+function filtrarVend(v) {
+  S.fVend = S.fVend === v ? "" : v;
+  atualizarVendSelect();
+  S.nPos = 100; S.nCli = 50;
+  renderAll();
 }
 
 function renderChips() {
@@ -294,7 +309,7 @@ function renderChips() {
 
 function kpiCard(icone, cor, titulo, valor, detalhe, nav) {
   const cls = nav ? ' klick" data-nav="' + nav : "";
-  return `<div class="kpi${cls}"><div class="hd"><div class="ic" style="background:${cor}22">${icone}</div>
+  return `<div class="kpi${cls}"><div class="hd"><div class="ic">${icone}</div>
     <div class="t">${titulo}</div></div><div class="v">${valor}</div><div class="d">${detalhe}</div></div>`;
 }
 
@@ -326,16 +341,18 @@ function renderKpis(rows, meses) {
   const ativosPer = rows.filter((p) => { const a = serie(p, S.ano); return a && meses.some((m) => a[m - 1]); }).length;
   const ticket = ativosPer ? fat / ativosPer : null;
 
+  /* tons CLAROS p/ leitura sobre o fundo teal dos cards */
+  const OKC = "#c9f5da", BADC = "#ffd2cb", WARNC = "#ffe6b3";
   const crescPill = cresc == null ? "" :
     `<span class="dl ${cresc >= 0 ? "up" : "dn"}">${cresc >= 0 ? "▲" : "▼"} ${fmtPct(Math.abs(cresc))}</span> `;
-  const atingCor = ating == null ? "var(--soft)" : ating >= 1 ? "var(--ok)" : ating >= 0.9 ? "var(--warn)" : "var(--bad)";
-  const escT = '<span style="color:var(--soft)">escopo total (sem filtro)</span>';
+  const atingCor = ating == null ? "rgba(255,255,255,.7)" : ating >= 1 ? OKC : ating >= 0.9 ? WARNC : BADC;
+  const escT = '<span style="opacity:.75">escopo total (sem filtro)</span>';
 
   $("kpis").innerHTML =
     kpiCard(IC.fat, "#2f7d7c", `Faturamento<br>líquido · ${rotuloPer()}`, fmtM(fat),
       crescPill + `vs ${S.ano - 1} mesmo período (${fmtM(ly)})`, "fat") +
     kpiCard(IC.meta, "#E0A339", "Atingimento<br>da meta", `<span style="color:${atingCor}">${fmtPct(ating)}</span>`,
-      meta ? `meta ${fmtM(meta)} · ${gap >= 0 ? "sobra" : "falta"} <b style="color:${gap >= 0 ? "var(--ok)" : "var(--bad)"}">${fmtM(Math.abs(gap))}</b>`
+      meta ? `meta ${fmtM(meta)} · ${gap >= 0 ? "sobra" : "falta"} <b style="color:${gap >= 0 ? OKC : BADC}">${fmtM(Math.abs(gap))}</b>`
            : "sem meta no período/seleção", "metas") +
     kpiCard(IC.vol, "#9B9741", "Volume<br>(caixas)", vol == null ? "—" : fmtNum(vol),
       ticket ? `Ticket médio <b>${fmtM(ticket)}</b>` : "Ticket médio —", "vol") +
@@ -345,7 +362,7 @@ function renderKpis(rows, meses) {
       filtrado() ? escT : "já abatida do líquido") +
     kpiCard(IC.pos, "#8AAB83", `Positivados<br>${noMes ? "no mês" : "no período"}`,
       `${fmtBR(positivados)}<small>/${fmtBR(base)}</small>`,
-      base ? `<b style="color:var(--teal-d)">${fmtPct(positivados / base)}</b> da base` : "", "posit");
+      base ? `<b>${fmtPct(positivados / base)}</b> da base` : "", "posit");
 
   document.querySelectorAll("#kpis .kpi.klick").forEach((el) =>
     el.addEventListener("click", () => trocarView(el.dataset.nav)));
@@ -354,6 +371,7 @@ function renderKpis(rows, meses) {
 /* ---------- evolução: sempre os últimos 12 meses ---------- */
 function renderEvolucao(rows) {
   const { ano, mes_atual } = S.data.periodo;
+  const me = S.data.meta_empresa_mensal;
   const itens = [];
   for (let k = 11; k >= 0; k--) {
     const idx = ano * 12 + mes_atual - 1 - k;
@@ -364,51 +382,65 @@ function renderEvolucao(rows) {
       if (a) fat += a[m - 1] || 0;
       if (b) ly += b[m - 1] || 0;
     }
-    itens.push({ label: `${MESES[m - 1]}/${String(y).slice(2)}`, fat, ly,
+    const meta = y === 2026 ? ((me && !filtrado()) ? me[m - 1] || 0
+                                                   : rows.reduce((s, c) => s + (c.meta[m - 1] || 0), 0)) : 0;
+    itens.push({ label: `${MESES[m - 1]}/${String(y).slice(2)}`, fat, ly, meta,
                  parcial: y === ano && m === mes_atual });
   }
-  $("evo-titulo").innerHTML = `Últimos 12 meses — Realizado × Ano anterior <span class="rg">R$</span>`;
+  $("evo-titulo").innerHTML = `Últimos 12 meses — Realizado × Ano anterior × Meta <span class="rg">R$</span>`;
   $("evo-chart").innerHTML = svgEvolucao(itens);
   $("evo-leg").innerHTML =
     `<span><i style="background:linear-gradient(180deg,#74AFAE,#2f7d7c)"></i>Realizado</span>` +
     `<span><i style="background:#dde3e5"></i>Mesmo mês do ano anterior</span>` +
+    `<span><i style="background:#C96643;height:3px;border-radius:2px"></i>Meta 2026</span>` +
     `<span><i style="background:#2e9e63"></i>▲▼ crescimento vs ano anterior</span>` +
     `<span style="margin-left:auto">${MESES[mes_atual - 1]}/${String(ano).slice(2)} = parcial</span>`;
 }
 
 function svgEvolucao(itens) {
-  const W = 720, H = 258, base = 214, topo = 50;
+  const W = 1140, H = 300, base = 252, topo = 56;
   const n = itens.length, passo = W / n;
-  const max = Math.max(1, ...itens.map((i) => Math.max(i.fat, i.ly)));
+  const max = Math.max(1, ...itens.map((i) => Math.max(i.fat, i.ly, i.meta || 0)));
   const y = (v) => base - (v / max) * (base - topo);
-  const wB = Math.min(17, passo * 0.32);
+  const wB = Math.min(26, passo * 0.32);
   let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%">`;
   s += '<g stroke="#eef1f2" stroke-width="1">';
   for (let i = 1; i <= 4; i++) s += `<line x1="0" y1="${topo + (base - topo) * i / 4}" x2="${W}" y2="${topo + (base - topo) * i / 4}"/>`;
   s += "</g>";
-  s += '<g font-size="10" fill="#8a979d" text-anchor="middle">';
+  s += '<g font-size="11" fill="#8a979d" text-anchor="middle">';
   itens.forEach((it, i) => { s += `<text x="${passo * i + passo / 2}" y="${H - 8}">${esc(it.label)}</text>`; });
   s += "</g>";
   s += '<defs><linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#74AFAE"/><stop offset="1" stop-color="#2f7d7c"/></linearGradient></defs>';
   itens.forEach((it, i) => {
-    const cx = passo * i + passo / 2;
+    const cx = passo * i + passo / 2, dl = `animation-delay:${i * 40}ms`;
     if (it.ly > 0)
-      s += `<rect x="${cx - wB - 1}" y="${y(it.ly)}" width="${wB}" height="${base - y(it.ly)}" rx="2.5" fill="#dde3e5"><title>${esc(it.label)} ano anterior: ${fmtM(it.ly)}</title></rect>`;
+      s += `<rect x="${cx - wB - 1.5}" y="${y(it.ly)}" width="${wB}" height="${base - y(it.ly)}" rx="3" fill="#dde3e5" style="${dl}"><title>${esc(it.label)} ano anterior: ${fmtM(it.ly)}</title></rect>`;
     if (it.fat > 0)
-      s += `<rect x="${cx + 1}" y="${y(it.fat)}" width="${wB}" height="${base - y(it.fat)}" rx="2.5" fill="url(#gt)"><title>${esc(it.label)}: ${fmtM(it.fat)}</title></rect>`;
+      s += `<rect x="${cx + 1.5}" y="${y(it.fat)}" width="${wB}" height="${base - y(it.fat)}" rx="3" fill="url(#gt)" style="${dl}"><title>${esc(it.label)}: ${fmtM(it.fat)}</title></rect>`;
     /* rótulos empilhados acima do par de barras:
        crescimento ▲/▼ (topo) → realizado (meio) → ano anterior (base, cinza) */
     const yTop = y(Math.max(it.fat, it.ly));
     if (it.ly > 0)
-      s += `<text x="${cx}" y="${yTop - 4}" font-size="8.5" fill="#8a979d" text-anchor="middle">${fmtNum(it.ly)}</text>`;
+      s += `<text x="${cx}" y="${yTop - 4}" font-size="9.5" fill="#8a979d" text-anchor="middle">${fmtNum(it.ly)}</text>`;
     if (it.fat > 0)
-      s += `<text x="${cx}" y="${yTop - 15}" font-size="9.5" font-weight="700" fill="#182226" text-anchor="middle">${fmtNum(it.fat)}${it.parcial ? "*" : ""}</text>`;
+      s += `<text x="${cx}" y="${yTop - 16}" font-size="10.5" font-weight="700" fill="#182226" text-anchor="middle">${fmtNum(it.fat)}${it.parcial ? "*" : ""}</text>`;
     if (it.fat > 0 && it.ly > 0 && !it.parcial) {  /* mês parcial não compara (1 dia vs mês cheio) */
       const g = (it.fat - it.ly) / it.ly;
       const cor = g >= 0 ? "#2e9e63" : "#cc4b41";
-      s += `<text x="${cx}" y="${yTop - 27}" font-size="9" font-weight="700" fill="${cor}" text-anchor="middle">${g >= 0 ? "▲" : "▼"} ${fmtBR(Math.abs(g) * 100, 0)}%</text>`;
+      s += `<text x="${cx}" y="${yTop - 29}" font-size="10" font-weight="700" fill="${cor}" text-anchor="middle">${g >= 0 ? "▲" : "▼"} ${fmtBR(Math.abs(g) * 100, 0)}%</text>`;
     }
   });
+  /* linha de META (páprica, tracejada) — pula meses sem meta */
+  let path = "", pontos = "";
+  itens.forEach((it, i) => {
+    if (!it.meta) { path += "|"; return; }
+    const cx = passo * i + passo / 2, cy = y(it.meta);
+    path += `${path.endsWith("|") || path === "" ? "M" : "L"}${cx},${cy} `;
+    pontos += `<circle cx="${cx}" cy="${cy}" r="3" fill="#C96643"><title>${esc(it.label)} meta: ${fmtM(it.meta)}</title></circle>`;
+  });
+  path = path.replaceAll("|", "");
+  if (path.trim())
+    s += `<g class="lm"><path d="${path.trim()}" fill="none" stroke="#C96643" stroke-width="2" stroke-dasharray="6 4" opacity=".85"/>${pontos}</g>`;
   return s + "</svg>";
 }
 
@@ -435,7 +467,7 @@ function renderSemaforo(rows) {
 }
 
 function renderFamilias() {
-  $("familias-mini").innerHTML = (S.data.familias || []).slice(0, 3).map((f, i) =>
+  $("familias-mini").innerHTML = (S.data.familias || []).slice(0, 8).map((f, i) =>
     `<li><span class="n">${i + 1}</span><span class="nm">${esc(f.nome)}</span><span class="vl">${fmtM(f.fat)}</span></li>`).join("");
 }
 
@@ -448,7 +480,9 @@ function agrupar(rows, campo, meses) {
     for (const m of meses) {
       o.meta += p.meta[m - 1] || 0;
       const a = serie(p, S.ano); if (a) o.realizado += a[m - 1] || 0;
-      const b = serie(p, S.ano - 1); if (b) o.ly += b[m - 1] || 0;
+      // ano anterior: mês corrente (parcial) entra pro-rata p/ comparação justa
+      const b = serie(p, S.ano - 1);
+      if (b) o.ly += (b[m - 1] || 0) * ((S.ano === S.data.periodo.ano && m === S.data.periodo.mes_atual) ? S.fracMes : 1);
     }
     o.clientes++; if (p.status === "ok") o.positivados++;
   }
@@ -543,32 +577,109 @@ function renderPositivados(rows) {
 }
 const sum26 = (p) => p.m26.reduce((s, v) => s + v, 0);
 
-/* ---------- Rankings ---------- */
+/* ---------- Rankings ricos dentro do Dashboard ---------- */
 function liRank(i, nome, sub, valor) {
   return `<li><span class="n">${i + 1}</span><span class="nm">${esc(nome)}${sub ? `<span class="sb">${esc(sub)}</span>` : ""}</span><span class="vl">${valor}</span></li>`;
 }
 
-function renderRankings(rows, meses) {
-  const d = S.data;
+const DASH = { cli: { col: "f26", dir: -1 }, ger: { col: "f26", dir: -1 }, vend: { col: "f26", dir: -1 } };
+
+function metDash(f25, f26, meta) {
+  return { f25, f26, cr: f25 > 0 ? (f26 - f25) / f25 : (f26 > 0 ? 1 : null),
+           meta, ating: meta ? f26 / meta : null, gap: meta ? f26 - meta : null };
+}
+/* agrega os clientes-bandeira (soma as fatias por vendedor) no período selecionado */
+function dashClientes(rows, meses) {
+  const { ano, mes_atual } = S.data.periodo;
+  const map = {};
+  for (const p of rows) {
+    const g = (map[p.cliente] ??= { nome: p.cliente, f25: 0, f26: 0, meta: 0, ult: null });
+    const a = serie(p, S.ano), b = serie(p, S.ano - 1);
+    for (const m of meses) {
+      if (a) g.f26 += a[m - 1] || 0;
+      if (b) g.f25 += (b[m - 1] || 0) * ((S.ano === ano && m === mes_atual) ? S.fracMes : 1);
+      if (S.ano === 2026) g.meta += p.meta[m - 1] || 0;
+    }
+    if (p.ult && (!g.ult || p.ult > g.ult)) g.ult = p.ult;
+  }
+  return Object.values(map).map((g) => ({ ...g, ...metDash(g.f25, g.f26, g.meta) }));
+}
+
+/* colunas comuns (estilo Faturamento) p/ as tabelas do Dashboard */
+function colsDash(rotuloNome, totalF26) {
+  const pct0 = (x) => x == null ? "—" : (x >= 0 ? "" : "−") + fmtBR(Math.abs(x) * 100, 0) + "%";
+  return [
+    { k: "nome", t: rotuloNome, v: (x) => x.nome, f: (x) => `<b>${esc(nomeVend(x.nome))}</b>` },
+    { k: "f25", t: String(S.ano - 1), r: 1, v: (x) => x.f25, f: (x) => fmtV(x.f25) },
+    { k: "f26", t: String(S.ano), r: 1, v: (x) => x.f26, f: (x) => `<b>${fmtV(x.f26)}</b>` },
+    { k: "cr", t: `${S.ano % 100} Vs ${(S.ano - 1) % 100}`, r: 1, v: (x) => x.cr,
+      f: (x) => `<span class="farolp ${farol(x.cr)}">${pct0(x.cr)}</span>` },
+    { k: "repr", t: "% Repres.", r: 1, v: (x) => x.f26, f: (x) => fmtBR(x.f26 / (totalF26 || 1) * 100, 1) + "%" },
+    { k: "meta", t: "Meta", r: 1, v: (x) => x.meta, f: (x) => x.meta ? fmtV(x.meta) : "—" },
+    { k: "ating", t: "% Ating.", r: 1, v: (x) => x.ating, f: (x) => x.ating == null ? "—" : fmtBR(x.ating * 100, 0) + "%" },
+    { k: "gap", t: "GAP", r: 1, v: (x) => x.gap,
+      f: (x) => x.gap == null ? "—" : `<span style="color:${x.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${(x.gap >= 0 ? "+" : "−") + fmtV(Math.abs(x.gap))}</span>` },
+  ];
+}
+
+function tabelaDash(el, key, cols, itens, topN, onRow, ativo) {
+  const st = DASH[key];
+  const cdef = cols.find((c) => c.k === st.col) || cols[1];
+  itens.sort((a, b) => st.col === "nome"
+    ? st.dir * String(cdef.v(a)).localeCompare(String(cdef.v(b)), "pt-BR")
+    : st.dir * ((cdef.v(a) ?? -Infinity) - (cdef.v(b) ?? -Infinity)));
+  const top = itens.slice(0, topN);
+  const th = `<th class="r">#</th>` + cols.map((c) =>
+    `<th class="${c.r ? "r " : ""}ord${st.col === c.k ? " ord-on" : ""}" data-k="${c.k}">${c.t}${st.col === c.k ? (st.dir < 0 ? " ▼" : " ▲") : ""}</th>`).join("");
+  const corpo = top.map((x, i) =>
+    `<tr class="dlin${ativo && x.nome === ativo ? " on" : ""}" data-n="${esc(x.nome)}"><td class="r"><b>${i + 1}</b></td>` +
+    cols.map((c) => `<td class="${c.r ? "r" : ""}">${c.f(x)}</td>`).join("") + "</tr>").join("");
+  $(el).innerHTML = `<table class="fat-tab dash-tab"><thead><tr>${th}</tr></thead><tbody>${corpo ||
+    `<tr><td colspan="${cols.length + 1}" class="empty">Sem dados na seleção.</td></tr>`}</tbody></table>`;
+  $(el).querySelectorAll("th.ord").forEach((h) => h.addEventListener("click", () => {
+    const k = h.dataset.k;
+    if (st.col === k) st.dir *= -1; else { st.col = k; st.dir = k === "nome" ? 1 : -1; }
+    renderDashRank();
+  }));
+  if (onRow) $(el).querySelectorAll("tr.dlin").forEach((r) =>
+    r.addEventListener("click", () => onRow(r.dataset.n)));
+}
+
+function renderDashRank() {
+  const rows = linhas(), meses = mesesSel(), d = S.data;
+
+  // Top 20 clientes → clique abre o Faturamento com o cliente buscado
+  const cli = dashClientes(rows, meses);
+  const totCli = cli.reduce((s, x) => s + x.f26, 0);
+  const colUlt = { k: "ult", t: "Últ. Compra", v: (x) => x.ult ? Date.parse(x.ult) : -Infinity,
+    f: (x) => { const dd = diasSemCompra(x.ult);
+      return `<span${dd != null && dd > 60 ? ' style="color:var(--bad);font-weight:700"' : ""}>${fmtDataCurta(x.ult)}</span>`; } };
+  tabelaDash("dash-cli", "cli", [...colsDash("CLIENTE", totCli), colUlt], cli, 20, (n) => {
+    trocarView("fat");
+    if ($("busca-fat")) { $("busca-fat").value = n; FAT.busca = n; if (FAT.cube) desenharFat(); }
+  });
+
+  // Gerentes (visão do gestor) → clique filtra a página
+  const extra = [
+    { k: "cli", t: "Clientes", r: 1, v: (x) => x.clientes, f: (x) => fmtBR(x.clientes) },
+    { k: "pos", t: "Posit. mês", r: 1, v: (x) => x.positivados, f: (x) => fmtBR(x.positivados) },
+  ];
+  const mapear = (o) => ({ nome: o.nome, clientes: o.clientes, positivados: o.positivados,
+                           ...metDash(o.ly, o.realizado, o.meta) });
+  if (d.escopo.perfil === "gestor") {
+    const ger = agrupar(rows, "ger", meses).map(mapear);
+    const totG = ger.reduce((s, x) => s + x.f26, 0);
+    tabelaDash("dash-ger", "ger", [...colsDash("GERENTE", totG), ...extra], ger, 100, filtrarGer, S.fGer);
+    $("card-dash-ger").style.display = "";
+  } else $("card-dash-ger").style.display = "none";
+
+  // Top 20 vendedores → clique filtra a página
   if (d.escopo.perfil !== "vendedor") {
-    const v = agrupar(rows, "vend", meses).slice(0, 10);
-    $("rk-vend").innerHTML = v.map((o, i) => liRank(i, nomeVend(o.nome), null, fmtV(o.realizado))).join("");
-    $("rk-vend-card").style.display = "";
-  } else $("rk-vend-card").style.display = "none";
-  if (d.escopo.perfil === "gestor" && !S.fGer) {
-    const g = agrupar(rows, "ger", meses).slice(0, 10);
-    $("rk-ger").innerHTML = g.map((o, i) => liRank(i, o.nome, null, fmtV(o.realizado))).join("");
-    $("rk-ger-card").style.display = "";
-  } else $("rk-ger-card").style.display = "none";
-  const c = rows.map((p) => {
-    let f = 0; const a = serie(p, S.ano);
-    if (a) for (const m of meses) f += a[m - 1] || 0;
-    return { p, f };
-  }).sort((x, y) => y.f - x.f).slice(0, 10);
-  $("rk-cli").innerHTML = c.map(({ p, f }, i) => liRank(i, p.cliente, `${nomeVend(p.vend)} · ${p.uf}`, fmtV(f))).join("");
-  const fm = (d.familias || []).slice(0, 10);
-  $("rk-fam").innerHTML = fm.map((o, i) => liRank(i, o.nome, null, fmtV(o.fat))).join("");
-  $("rk-fam-nota").style.display = (filtrado() || S.ano !== 2026) ? "" : "none";
+    const vend = agrupar(rows, "vend", meses).map(mapear);
+    const totV = vend.reduce((s, x) => s + x.f26, 0);
+    tabelaDash("dash-vend", "vend", [...colsDash("VENDEDOR", totV), ...extra], vend, 20, filtrarVend, S.fVend);
+    $("card-dash-vend").style.display = "";
+  } else $("card-dash-vend").style.display = "none";
 }
 
 /* ---------------- exportação PDF / Excel ---------------- */
@@ -728,6 +839,19 @@ async function exportExcel() {
         [null, XL.num], [24, 12]);
       xlTabela(ws, "Top famílias (YTD escopo)", ["Família", "Faturamento"],
         (S.data.familias || []).slice(0, 10).map((f) => [f.nome, Math.round(f.fat)]), [null, XL.money], [26, 16]);
+      // rankings ricos (mesmas tabelas do Dashboard)
+      const cabR = ["#", "Nome", String(S.ano - 1), String(S.ano), "Cresc.", "Meta", "% Ating.", "GAP"];
+      const fmtsR = [XL.num, null, XL.money, XL.money, XL.pct, XL.money, XL.pct, XL.money];
+      const linR = (x, i) => [i + 1, nomeVend(x.nome), Math.round(x.f25), Math.round(x.f26), x.cr,
+        x.meta ? Math.round(x.meta) : null, x.ating, x.gap == null ? null : Math.round(x.gap)];
+      const mapR = (o) => ({ nome: o.nome, ...metDash(o.ly, o.realizado, o.meta) });
+      xlTabela(ws, "Top 20 clientes", cabR,
+        dashClientes(rows, meses).sort((a, b) => b.f26 - a.f26).slice(0, 20).map(linR), fmtsR,
+        [5, 34, 14, 14, 10, 13, 9, 13]);
+      if (S.data.escopo.perfil === "gestor")
+        xlTabela(ws, "Gerentes", cabR, agrupar(rows, "ger", meses).map(mapR).map(linR), fmtsR);
+      if (S.data.escopo.perfil !== "vendedor")
+        xlTabela(ws, "Top 20 vendedores", cabR, agrupar(rows, "vend", meses).map(mapR).slice(0, 20).map(linR), fmtsR);
 
     } else if (v === "fat") {
       if (!FAT.cube) {
@@ -789,23 +913,6 @@ async function exportExcel() {
         [null, null, null, null, XL.num, null, XL.num, null, XL.money, XL.money, XL.money],
         [34, 24, 22, 8, 8, 12, 10, 20, 14, 14, 15]);
 
-    } else if (v === "rank") {
-      if (S.data.escopo.perfil === "gestor" && !S.fGer)
-        xlTabela(ws, "Gerentes", ["#", "Gerente", "Faturamento"],
-          agrupar(rows, "ger", meses).map((o, i) => [i + 1, o.nome, Math.round(o.realizado)]),
-          [XL.num, null, XL.money], [5, 30, 16]);
-      if (S.data.escopo.perfil !== "vendedor")
-        xlTabela(ws, "Vendedores", ["#", "Vendedor", "Faturamento"],
-          agrupar(rows, "vend", meses).map((o, i) => [i + 1, nomeVend(o.nome), Math.round(o.realizado)]),
-          [XL.num, null, XL.money], [5, 30, 16]);
-      const cli = rows.map((p) => { let f = 0; const a = serie(p, S.ano); if (a) for (const m of meses) f += a[m - 1] || 0; return { p, f }; })
-        .sort((x, y) => y.f - x.f).slice(0, 50);
-      xlTabela(ws, "Clientes (top 50)", ["#", "Cliente", "Vendedor", "UF", "Faturamento"],
-        cli.map(({ p, f }, i) => [i + 1, p.cliente, nomeVend(p.vend), p.uf, Math.round(f)]),
-        [XL.num, null, null, null, XL.money], [5, 34, 24, 8, 16]);
-      xlTabela(ws, "Famílias (YTD escopo)", ["#", "Família", "Faturamento"],
-        (S.data.familias || []).map((f, i) => [i + 1, f.nome, Math.round(f.fat)]),
-        [XL.num, null, XL.money], [5, 28, 16]);
     }
 
     const buf = await wb.xlsx.writeBuffer();
