@@ -1133,7 +1133,7 @@ function dashRegioes(meses, porRegiao) {
 /* ---------------- exportação PDF / Excel ---------------- */
 const viewAtiva = () => document.querySelector(".view.on").id.slice(2);
 const NOMES_VIEW = { geral: "Dashboard", fat: "Faturamento", vol: "Volume / Mix",
-                     basket: "Análise Basket", curva: "Curva A Mix",
+                     basket: "Análise Basket", curva: "RKG Itens",
                      metas: "Metas vs Realizado", posit: "Positivados" };
 
 function contextoTxt() {
@@ -1341,18 +1341,18 @@ async function exportExcel() {
       }
       const { itens, ativos, rot } = calcCurva();
       itens.sort((a, b) => a.rkgGeral - b.rkgGeral);
-      xlTabela(ws, `Curva A · Mix campeão — ${rot} · base ativa ${ativos} clientes · pesos 45/30/25` +
+      xlTabela(ws, `RKG Itens — ${rot} · base ativa ${ativos} clientes · pesos 45/30/25` +
         (CURVA.canais.length ? ` · canais: ${CURVA.canais.join(" + ")}` : ""),
         ["RKG GERAL", "CATEGORIA", "ITEM", "ID", "EAN", "RKG LINHA",
-         "Valor acum. 6m", "Qtde acum. 6m", "Clientes", "Distribuição",
-         "Nota valor", "Nota caixas", "Nota giro", "PONTUAÇÃO", "CURVA", "MIX PRIORITÁRIO"],
+         "Valor acum. 6m", "Qtde acum. 6m", "% Repr. valor", "% Repr. vol", "Clientes", "Distribuição",
+         "Nota valor", "Nota caixas", "Nota giro", "PONTUAÇÃO", "CURVA", "MIX PRIORITÁRIO", "RKG OFICIAL"],
         itens.map((a) => [a.rkgGeral, a.cat, a.nome, a.id, a.ean, a.rkgLinha,
-          Math.round(a.val), Math.round(a.cx), a.ncli, a.dist,
+          Math.round(a.val), Math.round(a.cx), a.reprVal, a.reprCx, a.ncli, a.dist,
           Math.round(a.nVal), Math.round(a.nCx), Math.round(a.nGiro), Math.round(a.score * 10) / 10,
-          a.curvaSug, a.acao]),
-        [XL.num, null, null, null, null, XL.num, XL.money, XL.num, XL.num, XL.pct,
-         XL.num, XL.num, XL.num, "0.0", null, null],
-        [9, 22, 36, 8, 15, 9, 14, 12, 9, 11, 9, 9, 9, 11, 7, 15]);
+          a.curvaSug, a.acao, (ofiDe(a) || {}).rkg ?? null]),
+        [XL.num, null, null, null, null, XL.num, XL.money, XL.num, XL.pct, XL.pct, XL.num, XL.pct,
+         XL.num, XL.num, XL.num, "0.0", null, null, XL.num],
+        [9, 22, 36, 8, 15, 9, 14, 12, 10, 10, 9, 11, 9, 9, 9, 11, 7, 15, 10]);
 
     } else if (v === "metas") {
       const nivel = (S.data.escopo.perfil === "gestor" && !S.fGer && !S.fVend) ? "ger"
@@ -1813,7 +1813,13 @@ function calcCurva() {
     ord.forEach((x, i) => x[alvo] = ord.length > 1 ? i / (ord.length - 1) * 100 : 100);
   };
   nota("val", "nVal"); nota("cx", "nCx"); nota("giro", "nGiro");
-  for (const a of itens) a.score = 0.45 * a.nVal + 0.30 * a.nCx + 0.25 * a.nGiro;
+  const valTot = itens.reduce((s, a) => s + a.val, 0) || 1;
+  const cxTot = itens.reduce((s, a) => s + a.cx, 0) || 1;
+  for (const a of itens) {
+    a.score = 0.45 * a.nVal + 0.30 * a.nCx + 0.25 * a.nGiro;
+    a.reprVal = a.val / valTot;          // representatividade em VALOR
+    a.reprCx = a.cx / cxTot;             // representatividade em VOLUME
+  }
   [...itens].sort((x, y) => y.score - x.score).forEach((x, i) => x.rkgGeral = i + 1);
   const porCat = {};
   for (const a of itens) (porCat[a.cat] ??= []).push(a);
@@ -1840,6 +1846,101 @@ function calcCurva() {
 const CORES_ACAO = { EXPANDIR: "var(--ok)", DEFENDER: "var(--teal-d)", TESTAR: "#b57f22",
                      MANTER: "var(--mut)", CAUDA: "var(--soft)" };
 
+/* base OFICIAL (definição manual enviada por upload) — casa por ID, com nome como reserva */
+function ofiDe(a) {
+  const reg = CURVA.oficial;
+  if (!reg || !reg.itens) return null;
+  if (CURVA._ofiSrc !== reg) {
+    const m = {};
+    for (const o of reg.itens) {
+      if (o.id) m["#" + String(o.id)] = o;
+      m[String(o.item || "").toUpperCase()] = o;
+    }
+    CURVA._ofiMap = m; CURVA._ofiSrc = reg;
+  }
+  return CURVA._ofiMap["#" + String(a.id)] || CURVA._ofiMap[String(a.nome || "").toUpperCase()] || null;
+}
+function carregarCurvaOficial() {
+  if (CURVA.oficial !== undefined || !curvaLiberada()) return;
+  CURVA.oficial = null;
+  fetch("/api/curva", { cache: "no-store" }).then((r) => r.ok ? r.json() : null)
+    .then((j) => { if (j) { CURVA.oficial = j; renderCurva(); } })
+    .catch(() => {});
+}
+function renderCurvaOficial() {
+  const reg = CURVA.oficial;
+  if (!reg || !reg.itens) { $("curva-oficial-info").textContent = ""; return; }
+  $("curva-oficial-info").textContent =
+    `VIGENTE — atualizada em ${new Date(reg.ts).toLocaleString("pt-BR")} · ${reg.itens.length} itens`;
+  $("curva-oficial-tab").innerHTML =
+    `<table class="fat-tab"><thead><tr><th class="r">RKG</th><th>ITEM</th><th class="r">ID</th>
+      <th class="r">CURVA</th><th>MIX PRIORITÁRIO</th></tr></thead><tbody>` +
+    [...reg.itens].sort((a, b) => (a.rkg ?? 9e9) - (b.rkg ?? 9e9)).map((o) =>
+      `<tr><td class="r"><b>${o.rkg ?? "—"}</b></td><td><b>${esc(o.item)}</b></td>
+       <td class="r">${esc(o.id || "")}</td>
+       <td class="r">${o.curva ? `<span class="curva c-${esc(o.curva)}">${esc(o.curva)}</span>` : "—"}</td>
+       <td style="font-size:10px;font-weight:700;color:${CORES_ACAO[o.acao] || "var(--mut)"}">${esc(o.acao || "—")}</td></tr>`).join("") +
+    "</tbody></table>";
+}
+async function processarUploadCurva(file) {
+  const msg = $("curva-oficial-msg");
+  msg.innerHTML = '<div class="note">⏳ Lendo o arquivo…</div>';
+  try {
+    const ExcelJS = await comExcelJS();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.worksheets[0];
+    let hdr = 0; const m = {};
+    ws.eachRow((row, n) => {
+      if (hdr) return;
+      const vals = (row.values || []).map((v) =>
+        String(v != null && typeof v === "object" ? (v.text ?? v.result ?? "") : (v ?? "")).toUpperCase().trim());
+      if (vals.includes("ITEM")) {
+        hdr = n;
+        vals.forEach((v, i) => {
+          if (v === "ITEM") m.item = i;
+          else if (v === "ID") m.id = i;
+          else if (m.rkg == null && v.includes("RKG")) m.rkg = i;
+          else if (m.curva == null && v.startsWith("CURVA")) m.curva = i;
+          else if (m.acao == null && (v.includes("MIX") || v.includes("PRIORIT"))) m.acao = i;
+        });
+      }
+    });
+    if (!hdr || m.item == null) throw new Error("não encontrei a coluna ITEM no arquivo");
+    const itens = [];
+    ws.eachRow((row, n) => {
+      if (n <= hdr) return;
+      const cel = (i) => {
+        if (i == null) return "";
+        const c = (row.values || [])[i];
+        if (c == null) return "";
+        return String(typeof c === "object" ? (c.text ?? c.result ?? "") : c).trim();
+      };
+      const item = cel(m.item);
+      if (!item) return;
+      itens.push({ item, id: cel(m.id),
+        rkg: parseInt(cel(m.rkg).replace(/[^\d]/g, ""), 10) || null,
+        curva: (cel(m.curva).toUpperCase().match(/[ABC]/) || [""])[0],
+        acao: cel(m.acao).toUpperCase() });
+    });
+    if (!itens.length) throw new Error("nenhuma linha de item encontrada abaixo do cabeçalho");
+    msg.innerHTML = `<div class="note">⏳ Gravando ${itens.length} itens como base oficial…</div>`;
+    const res = await fetch("/api/curva", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ itens }) });
+    if (!res.ok) throw new Error("o servidor recusou a gravação (" + res.status + ")");
+    const j = await res.json();
+    CURVA.oficial = { itens, ts: j.ts };
+    msg.innerHTML = `<div class="note" style="background:#e8f6ee;border-color:#bfe3cd;color:#1d6b3f">
+      ✔ <b>Sistema atualizado!</b> Sua base com ${itens.length} itens é a regra vigente desde
+      ${new Date(j.ts).toLocaleString("pt-BR")} — ela aparece abaixo e na coluna RKG OFICIAL da análise.</div>`;
+    renderCurva();
+    $("card-curva-oficial").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    msg.innerHTML = `<div class="note" style="background:var(--bad-bg);border-color:#eec7c2;color:var(--bad)">
+      ✖ Não consegui processar: ${esc(e.message || e)}. Use o Excel baixado desta guia (colunas ITEM, ID, RKG, CURVA, MIX PRIORITÁRIO).</div>`;
+  }
+}
+
 function renderCurva() {
   if (!curvaLiberada()) { $("curva-conteudo").innerHTML = '<div class="empty">Visão restrita.</div>'; return; }
   if (!MIX.cube) {
@@ -1847,6 +1948,7 @@ function renderCurva() {
     carregarMix();
     return;
   }
+  carregarCurvaOficial();
   const { itens, ativos, rot } = calcCurva();
   // seletor de linha (preserva a seleção)
   const cats = [...new Set(itens.map((a) => a.cat))].sort();
@@ -1873,12 +1975,15 @@ function renderCurva() {
     { k: "rkgGeral", t: "RKG GERAL", r: 1, v: (x) => x.rkgGeral },
     { k: "val", t: "VALOR ACUM. 6M", r: 1, v: (x) => x.val },
     { k: "cx", t: "QTDE ACUM. 6M", r: 1, v: (x) => x.cx },
+    { k: "reprVal", t: "% REPR. VALOR", r: 1, v: (x) => x.reprVal },
+    { k: "reprCx", t: "% REPR. VOL", r: 1, v: (x) => x.reprCx },
     { k: "dist", t: "DISTRIBUIÇÃO", r: 1, v: (x) => x.dist },
     { k: "score", t: "PONTUAÇÃO", r: 1, v: (x) => x.score },
     { k: "curvaSug", t: "CURVA", r: 1, v: (x) => ({ A: 3, B: 2, C: 1 })[x.curvaSug] },
     { k: "acao", t: "MIX PRIORITÁRIO", str: 1, v: (x) => x.acao },
+    { k: "rkgOf", t: "RKG OFICIAL", r: 1, v: (x) => (ofiDe(x) || {}).rkg ?? 9e9 },
   ];
-  const cdef = cols.find((c) => c.k === CURVA.col) || cols[9];
+  const cdef = cols.find((c) => c.k === CURVA.col) || cols[11];
   lista.sort((a, b) => cdef.str
     ? CURVA.dir * String(cdef.v(a)).localeCompare(String(cdef.v(b)), "pt-BR")
     : CURVA.dir * (cdef.v(a) - cdef.v(b)));
@@ -1895,11 +2000,16 @@ function renderCurva() {
      <td class="r">${a.rkgGeral}</td>
      <td class="r">${fmtV(a.val)}</td>
      <td class="r">${fmtBR(a.cx, 0)}</td>
+     <td class="r">${fmtBR(a.reprVal * 100, 1)}%</td>
+     <td class="r">${fmtBR(a.reprCx * 100, 1)}%</td>
      <td class="r" title="${fmtBR(a.ncli)} de ${fmtBR(ativos)} clientes ativos">${fmtBR(a.ncli)} · ${fmtBR(a.dist * 100, 0)}%</td>
      <td class="r" title="notas 0–100 → valor ${fmtBR(a.nVal, 0)} · caixas ${fmtBR(a.nCx, 0)} · giro/cliente ${fmtBR(a.nGiro, 0)} (${fmtBR(a.giro, 1)} cx/cli)">
        <b style="color:var(--teal-d)">${fmtBR(a.score, 1)}</b></td>
      <td class="r"><span class="curva c-${esc(a.curvaSug)}">${a.curvaSug}</span></td>
-     <td style="font-size:10px;font-weight:700;color:${CORES_ACAO[a.acao]}">${a.acao}</td></tr>`).join("");
+     <td style="font-size:10px;font-weight:700;color:${CORES_ACAO[a.acao]}">${a.acao}</td>
+     <td class="r">${(() => { const o = ofiDe(a); return o && o.rkg != null
+       ? `<b title="sua definição${o.curva ? " · curva " + esc(o.curva) : ""}${o.acao ? " · " + esc(o.acao) : ""}">${o.rkg}</b>`
+       : '<span style="color:var(--soft)">—</span>'; })()}</td></tr>`).join("");
   const nA = itens.filter((a) => a.curvaSug === "A").length;
   const nExp = itens.filter((a) => a.acao === "EXPANDIR").length;
   $("curva-info").textContent =
@@ -1908,13 +2018,14 @@ function renderCurva() {
     ` · curva A = ${nA} itens (80% do valor) · ${nExp} p/ EXPANDIR · pesos 45/30/25`;
   $("curva-conteudo").innerHTML =
     `<table class="fat-tab"><thead><tr>${th}</tr></thead><tbody>${corpo ||
-      '<tr><td colspan="13" class="empty">Sem itens.</td></tr>'}</tbody></table>`;
+      '<tr><td colspan="16" class="empty">Sem itens.</td></tr>'}</tbody></table>`;
   document.querySelectorAll("#curva-conteudo th.ord").forEach((h) => h.addEventListener("click", () => {
     const k = h.dataset.k;
     if (CURVA.col === k) CURVA.dir *= -1;
-    else { CURVA.col = k; CURVA.dir = ["cat", "nome", "ean", "rkgLinha", "rkgGeral"].includes(k) ? 1 : -1; }
+    else { CURVA.col = k; CURVA.dir = ["cat", "nome", "ean", "rkgLinha", "rkgGeral", "rkgOf"].includes(k) ? 1 : -1; }
     renderCurva();
   }));
+  renderCurvaOficial();
 }
 
 /* ---------------- Volume/Mix: batalha naval itens × clientes ---------------- */
@@ -2035,6 +2146,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if ($("curva-linha")) $("curva-linha").addEventListener("change", (e) => {
     CURVA.linha = e.target.value;
     renderCurva();
+  });
+  if ($("curva-upload")) $("curva-upload").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (f) processarUploadCurva(f);
+    e.target.value = "";
   });
   // batalha naval: alternar métrica das células
   document.querySelectorAll("[data-vm]").forEach((b) => b.addEventListener("click", () => {
