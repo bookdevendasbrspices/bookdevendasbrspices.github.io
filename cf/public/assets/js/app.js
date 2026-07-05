@@ -984,7 +984,7 @@ function renderDashRank() {
     colsProd.splice(1, 0,
       { k: "cat", t: "Família", v: (x) => rotuloCat(x.cat),
         f: (x) => `<span style="color:var(--mut);font-size:10.5px">${esc(rotuloCat(x.cat))}</span>` },
-      { k: "curva", t: "Curva", v: (x) => ({ A: 6, B: 5, C: 4, D: 3, DELIST: 1 })[curvaNorm(x.curva)] || 2,
+      { k: "curva", t: "Curva", v: (x) => ({ A: 6, B: 5, C: 4, D: 3, FL: 1 })[curvaNorm(x.curva)] || 2,
         f: (x) => seloCurva(x.curva) });
     tabelaDash("dash-prod", "prod", [...colsProd, ...colsVolBase(totVP)], prods, 30, filtrarProd, S.fProd);
   }
@@ -1850,18 +1850,20 @@ function calcCurva() {
 const CORES_ACAO = { EXPANDIR: "var(--ok)", DEFENDER: "var(--teal-d)", TESTAR: "#b57f22",
                      MANTER: "var(--mut)", CAUDA: "var(--soft)", "AVALIAR DELIST": "#d0021b" };
 
-/* curva de vendas: normalização e selo no padrão de cores da empresa (A–D azuis, DELIST vermelho) */
+/* curva de vendas: normalização e selo no padrão de cores da empresa
+   (A–D azuis; FL = Fora de Linha/delist em branco com fonte e borda vermelhas) */
 function curvaNorm(c) {
   const s = String(c || "").toUpperCase().trim();
   if (!s) return "";
-  if (s.includes("DELIST")) return "DELIST";
+  if (s.includes("DELIST") || s.includes("FORA") || s === "FL") return "FL";
   if (/^[ABCD]$/.test(s[0]) && s.length <= 2) return s[0];
   return s;
 }
 function seloCurva(c) {
   const s = curvaNorm(c);
   if (!s) return '<span style="color:var(--soft)">—</span>';
-  if (["A", "B", "C", "D", "DELIST"].includes(s)) return `<span class="curva c-${s}">${s}</span>`;
+  if (s === "FL") return '<span class="curva c-FL" title="Fora de linha (item descontinuado / delist)">FL</span>';
+  if (["A", "B", "C", "D"].includes(s)) return `<span class="curva c-${s}">${s}</span>`;
   if (s.includes("LÇT") || s.includes("LCT") || s.includes("LAN")) return `<span class="curva c-LCT">${esc(s)}</span>`;
   return `<span class="curva c-X">${esc(s)}</span>`;
 }
@@ -2026,7 +2028,7 @@ function renderCurva() {
     { k: "score", t: "PONTUAÇÃO", r: 1, v: (x) => x.score },
     { k: "curvaSug", t: "CURVA", r: 1, v: (x) => ({ A: 5, B: 4, C: 3, D: 2 })[x.curvaSug] || 1 },
     { k: "acao", t: "MIX PRIORITÁRIO", str: 1, v: (x) => x.acao },
-    { k: "curvaOf", t: "CURVA OFICIAL", r: 1, v: (x) => ({ A: 6, B: 5, C: 4, D: 3, DELIST: 1 })[(ofiDe(x) || {}).curva] || 0 },
+    { k: "curvaOf", t: "CURVA OFICIAL", r: 1, v: (x) => ({ A: 6, B: 5, C: 4, D: 3, FL: 1 })[curvaNorm((ofiDe(x) || {}).curva)] || 0 },
     { k: "rkgOf", t: "RKG LINHA OFICIAL", r: 1, v: (x) => (ofiDe(x) || {}).rkg ?? 9e9 },
   ];
   const cdef = cols.find((c) => c.k === CURVA.col) || cols[11];

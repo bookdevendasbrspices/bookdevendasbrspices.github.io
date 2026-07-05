@@ -222,7 +222,7 @@ h2.pg::before{content:"";width:9px;height:9px;background:var(--teal);transform:r
 .c-B{background:#296BA7;color:#fff}
 .c-C{background:#438DD1;color:#fff}
 .c-D{background:#78ADDE;color:#fff}
-.c-DELIST{background:#fff;color:#d0021b;border:1.5px solid #d0021b}
+.c-DELIST,.c-FL{background:#fff;color:#d0021b;border:1px solid #d0021b}  /* FL = fora de linha */
 .c-LCT{background:#fff;color:var(--teal-d);border:1px solid var(--teal)}
 .c-X{background:#f0f0f0;color:#7a848a}
 
