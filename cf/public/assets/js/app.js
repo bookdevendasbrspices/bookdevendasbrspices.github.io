@@ -807,7 +807,7 @@ function colsDash(rotuloNome, totalF26) {
       f: (x) => `<span class="farolp ${farol(x.cr)}">${pct0(x.cr)}</span>` },
     { k: "repr", t: "% Repres.", r: 1, v: (x) => x.f26, f: (x) => fmtBR(x.f26 / (totalF26 || 1) * 100, 1) + "%" },
     { k: "meta", t: "Meta", r: 1, v: (x) => x.meta, f: (x) => x.meta ? fmtV(x.meta) : "—" },
-    { k: "ating", t: "% Ating.", r: 1, v: (x) => x.ating, f: (x) => x.ating == null ? "—" : fmtBR(x.ating * 100, 0) + "%" },
+    { k: "ating", t: "% Ating.", r: 1, v: (x) => x.ating, f: (x) => atingHtml(x.ating) },
     { k: "gap", t: "GAP", r: 1, v: (x) => x.gap,
       f: (x) => x.gap == null ? "—" : `<span style="color:${x.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${(x.gap >= 0 ? "+" : "−") + fmtV(Math.abs(x.gap))}</span>` },
   ];
@@ -1374,6 +1374,10 @@ function metricasUF(u) {
 }
 
 const farol = (x) => x == null ? "" : x >= 0.12 ? "cor-ok" : x >= 0 ? "cor-med" : "cor-bad";
+/* farol do atingimento de meta: verde ≥100% · amarelo ≥90% · vermelho <90% */
+const farolAting = (x) => x == null ? "" : x >= 1 ? "cor-ok" : x >= 0.9 ? "cor-med" : "cor-bad";
+const atingHtml = (x) => x == null ? "—"
+  : `<span class="farolp ${farolAting(x)}">${fmtBR(x * 100, 0)}%</span>`;
 
 const FAT_COLS = [
   { k: "rkg", t: "#", sort: false },
@@ -1532,7 +1536,7 @@ function celFat(m, base) {
     `<td class="r">${fmtBR(repr * 100, 1)}%</td>` +
     `<td class="r">${m.meta ? fmtV(m.meta) : "—"}</td>` +
     `<td class="r">${fmtV(m.realizado)}</td>` +
-    `<td class="r">${m.ating == null ? "—" : fmtBR(m.ating * 100, 0) + "%"}</td>` +
+    `<td class="r">${atingHtml(m.ating)}</td>` +
     `<td class="r" style="color:${m.gap == null ? "var(--soft)" : m.gap >= 0 ? "var(--ok)" : "var(--bad)"}">${m.gap == null ? "—" : (m.gap >= 0 ? "+" : "−") + fmtV(Math.abs(m.gap))}</td>` +
     `<td${dias != null && dias > 60 ? ' style="color:var(--bad);font-weight:700"' : ""}>${fmtDataCurta(m.ult)}</td>` +
     `<td class="r">${m.mesAtual ? fmtV(m.mesAtual) : "—"}</td>` +
