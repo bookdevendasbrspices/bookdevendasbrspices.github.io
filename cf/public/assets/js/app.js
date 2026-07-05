@@ -200,7 +200,52 @@ function boot() {
   if (d.escopo.perfil === "vendedor") $("f-vend-wrap").style.display = "none";
   else atualizarVendSelect();
 
+  // janelas customizadas no lugar das listas nativas (padrão visual dos painéis)
+  ddProxy("f-ano"); ddProxy("f-ger"); ddProxy("f-vend");
+
   renderAll();
+}
+
+/* dropdown customizado sobre um <select> nativo (Ano/Gerente/Vendedor):
+   o select continua existindo escondido (todo o código segue lendo/gravando .value);
+   a janela visual segue o padrão dos painéis de checkbox (11px, peso 500, hover) */
+function ddProxy(selId) {
+  const sel = $(selId);
+  if (!sel || sel.dataset.dd) return;
+  sel.dataset.dd = "1";
+  sel.style.display = "none";
+  const wrap = document.createElement("div");
+  wrap.className = "f-per";
+  wrap.style.position = "relative";
+  wrap.innerHTML = `<button type="button" class="perbtn dd-btn"></button>
+    <div class="perpanel dd-panel"></div>`;
+  sel.parentNode.insertBefore(wrap, sel);
+  const btn = wrap.firstElementChild, panel = wrap.lastElementChild;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    document.querySelectorAll(".perpanel").forEach((p) => { if (p !== panel) p.classList.remove("on"); });
+    panel.classList.toggle("on");
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => panel.classList.remove("on"));
+  sel._ddSync = () => {
+    btn.textContent = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : "—";
+    panel.innerHTML = [...sel.options].map((o) =>
+      `<div class="dd-item${o.value === sel.value ? " on" : ""}" data-v="${esc(o.value)}">${esc(o.textContent)}</div>`).join("");
+    panel.querySelectorAll(".dd-item").forEach((it) => it.addEventListener("click", () => {
+      sel.value = it.dataset.v;
+      panel.classList.remove("on");
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      sel._ddSync();
+    }));
+  };
+  sel._ddSync();
+}
+function sincronizarDropdowns() {
+  for (const id of ["f-ano", "f-ger", "f-vend"]) {
+    const s = $(id);
+    if (s && s._ddSync) s._ddSync();
+  }
 }
 
 function preencherSelect(id, itens, labelFn) {
@@ -436,6 +481,7 @@ function filtrarUF(u) {
 function renderChips() {
   $("per-btn").textContent = rotuloPer();
   if ($("perq-btn")) $("perq-btn").textContent = rotuloPer();
+  sincronizarDropdowns();
   const f = [S.ano + " · " + rotuloPer()];
   if (S.fEstr.length) f.push("Estrutura: " + S.fEstr.join(" + "));
   if (S.fGer) f.push("Gerente: " + S.fGer);

@@ -138,6 +138,14 @@ main{margin-left:230px;padding:22px 24px 66px;max-width:1400px}
 .estr button:hover{color:#fff}
 .estr button.on{background:linear-gradient(180deg,var(--aqua),var(--teal-d));color:#fff}
 
+/* dropdown customizado (Ano/Gerente/Vendedor) — mesmo padrão dos painéis de checkbox */
+.dd-btn{min-width:96px;max-width:178px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dd-panel{width:232px;max-height:320px;overflow-y:auto;padding:6px}
+.dd-item{padding:5px 9px;border-radius:6px;font-size:11px;font-weight:500;color:var(--txt);
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dd-item:hover{background:#f2f5f5}
+.dd-item.on{background:#e2f0ef;color:var(--teal-d);font-weight:600}
+
 /* seletor de meses (dropdown) + botões de período inline */
 .f-per{position:relative}
 .perbtn{min-width:100px;text-align:left;display:flex;align-items:center;gap:6px}
