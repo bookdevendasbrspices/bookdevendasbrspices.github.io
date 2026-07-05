@@ -54,6 +54,7 @@
           <div class="nav-i" data-v="fat"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 17l5-5 4 4 8-8"/><path d="M14 8h6v6"/></svg>Faturamento</div>
           <div class="nav-i" data-v="vol"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>Volume / Mix</div>
           <div class="nav-i" data-v="basket"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 10h16l-2 10H6zM8 10l3-6M16 10l-3-6"/></svg>Análise Basket</div>
+          <div class="nav-i" data-v="curva" id="nav-curva" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 19h16M6 16c3-9 7-9 12-12M15 4h3v3"/></svg>Curva A · Mix<span class="tag">RESTRITO</span></div>
           <div class="nav-i" data-v="metas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>Metas vs Realizado</div>
           <div class="nav-i" data-v="posit"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5.5"/></svg>Positivados</div>
         </div>
@@ -257,6 +258,22 @@
       <div class="card">
         <h3>Clientes com cesta rasa <span class="rg">faturam bem com poucos itens — onde ampliar o mix</span></h3>
         <div class="twrap" id="basket-rasa"></div>
+      </div>
+    </section>
+
+    <!-- ========== CURVA A · MIX (restrito) ========== -->
+    <section class="view" id="v-curva">
+      <h2 class="pg">Curva A · Mix campeão <span class="rg" style="font-size:11px">visão restrita — apoio à definição manual do ranking</span></h2>
+      <div class="sub">Base <b>empresa inteira</b>, <b>últimos 6 meses fechados</b> (revisão trimestral).
+        Pontuação = <b>45% valor</b> + <b>30% caixas</b> + <b>25% giro por cliente</b> (notas por percentil, 0–100).
+        Distribuição fica de fora da nota de propósito: item forte com distribuição baixa é aposta de cadastro, não item fraco.
+        Ordene, compare com sua leitura e bata o martelo manualmente.</div>
+      <div class="card">
+        <div class="tctl">
+          <select id="curva-linha" style="background:#f6f8f8;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px"></select>
+          <span style="margin-left:auto;color:var(--soft);font-size:11.5px" id="curva-info"></span>
+        </div>
+        <div class="twrap" id="curva-conteudo"><div class="empty">Carregando…</div></div>
       </div>
     </section>
 

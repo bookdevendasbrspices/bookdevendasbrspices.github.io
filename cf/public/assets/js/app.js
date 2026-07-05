@@ -171,6 +171,7 @@ function boot() {
   $("gate").style.display = "none";
   $("app").classList.add("on");
   if (d.escopo.admin) { $("sec-admin").style.display = ""; $("nav-admin").style.display = ""; }
+  if (curvaLiberada()) $("nav-curva").style.display = "";   // visão restrita ao Fernando
 
   const perfilTxt = d.escopo.cargo ||
     ({ gestor: "GESTÃO — VÊ TUDO", gerente: "GERENTE — SUA EQUIPE", vendedor: "VENDEDOR — SUA CARTEIRA" }[d.escopo.perfil] || d.escopo.perfil);
@@ -390,6 +391,7 @@ function renderAll() {
   if (FAT.cube && $("v-fat").classList.contains("on")) desenharFat();
   if ($("v-basket").classList.contains("on")) renderBasket();
   if ($("v-vol").classList.contains("on")) renderVol();
+  if ($("v-curva").classList.contains("on")) renderCurva();
 }
 
 /* cross-filter: clicar filtra a página toda; clicar de novo desfaz */
@@ -1131,7 +1133,8 @@ function dashRegioes(meses, porRegiao) {
 /* ---------------- exportação PDF / Excel ---------------- */
 const viewAtiva = () => document.querySelector(".view.on").id.slice(2);
 const NOMES_VIEW = { geral: "Dashboard", fat: "Faturamento", vol: "Volume / Mix",
-                     basket: "Análise Basket", metas: "Metas vs Realizado", posit: "Positivados" };
+                     basket: "Análise Basket", curva: "Curva A Mix",
+                     metas: "Metas vs Realizado", posit: "Positivados" };
 
 function contextoTxt() {
   const f = [];
@@ -1330,6 +1333,24 @@ async function exportExcel() {
       });
       xlTabela(ws, "Abertura por UF (Top 20) — % Repr relativo ao cliente", cab, ufRows, fmts);
 
+    } else if (v === "curva") {
+      if (!MIX.cube) {
+        const res = await fetch("/api/mixcube", { cache: "no-store" });
+        if (!res.ok) throw new Error("cubo indisponível");
+        MIX.cube = await res.json();
+      }
+      const { itens, ativos, rot } = calcCurva();
+      itens.sort((a, b) => a.rkgGeral - b.rkgGeral);
+      xlTabela(ws, `Curva A · Mix campeão — ${rot} · base ativa ${ativos} clientes · pesos 45/30/25`,
+        ["RKG GERAL", "CATEGORIA", "ITEM", "ID", "EAN", "RKG LINHA",
+         "Valor acum. 6m", "Qtde acum. 6m", "Clientes", "Distribuição", "Nota valor", "Nota caixas", "Nota giro", "PONTUAÇÃO"],
+        itens.map((a) => [a.rkgGeral, a.cat, a.nome, a.id, a.ean, a.rkgLinha,
+          Math.round(a.val), Math.round(a.cx), a.ncli, a.dist,
+          Math.round(a.nVal), Math.round(a.nCx), Math.round(a.nGiro), Math.round(a.score * 10) / 10]),
+        [XL.num, null, null, null, null, XL.num, XL.money, XL.num, XL.num, XL.pct,
+         XL.num, XL.num, XL.num, "0.0"],
+        [9, 22, 36, 8, 15, 9, 14, 12, 9, 11, 9, 9, 9, 11]);
+
     } else if (v === "metas") {
       const nivel = (S.data.escopo.perfil === "gestor" && !S.fGer && !S.fVend) ? "ger"
         : (S.data.escopo.perfil !== "vendedor" && !S.fVend) ? "vend" : "cliente";
@@ -1382,6 +1403,7 @@ function trocarView(v) {
   if (v === "fat") renderFat();
   if (v === "vol") renderVol();
   if (v === "basket") renderBasket();
+  if (v === "curva") renderCurva();
 }
 
 /* placeholders informativos (conteúdo real vem na expansão do pipeline de dados) */
@@ -1743,6 +1765,114 @@ function renderBasket() {
     "</tbody></table>";
 }
 
+/* ---------------- Curva A · Mix (RESTRITO — apoio à definição manual trimestral) ---------------- */
+const CURVA = { col: "score", dir: -1, linha: "" };
+const curvaLiberada = () => {
+  if (!S.data) return false;
+  const eu = (S.data.escopo.email || S.data.escopo.login || "").toLowerCase();
+  return eu === "fernando.oliveira.fer85@gmail.com" || eu === "fernando.oliveira";
+};
+
+function calcCurva() {
+  // janela: últimos 6 meses FECHADOS — base EMPRESA inteira (ignora os filtros da barra)
+  const { ano, mes_atual } = S.data.periodo;
+  const baseIdx = ano * 12 + (mes_atual - 1);
+  const win = [];
+  for (let k = 6; k >= 1; k--) { const i = baseIdx - k; win.push({ y: Math.floor(i / 12), m: (i % 12) + 1 }); }
+  const somaW = (e, c25, c26) => win.reduce((s, p) =>
+    s + (((p.y === 2026 ? e[c26] : p.y === 2025 ? e[c25] : null) || [])[p.m - 1] || 0), 0);
+  const agg = {};
+  for (const p of MIX.cube.prods) {
+    const v = somaW(p, "m25", "m26"), c = somaW(p, "q25", "q26");
+    if (v <= 0 && c <= 0) continue;
+    const a = (agg[p.prod] ??= { nome: p.prod, cat: p.cat, val: 0, cx: 0, cli: new Set() });
+    a.val += v; a.cx += c; a.cli.add(p.cliente);
+  }
+  const ids = MIX.cube.ids || {};
+  const ativos = S.data.clientes.filter(ativo6).length || 1;
+  const itens = Object.values(agg).filter((a) => a.val > 0);
+  for (const a of itens) {
+    a.ncli = a.cli.size;
+    a.giro = a.cx / (a.ncli || 1);
+    a.dist = a.ncli / ativos;
+    a.id = (ids[a.nome] || {}).id || "";
+    a.ean = (ids[a.nome] || {}).ean || "";
+  }
+  // notas 0–100 por percentil (robustas a outliers)
+  const nota = (campo, alvo) => {
+    const ord = [...itens].sort((x, y) => x[campo] - y[campo]);
+    ord.forEach((x, i) => x[alvo] = ord.length > 1 ? i / (ord.length - 1) * 100 : 100);
+  };
+  nota("val", "nVal"); nota("cx", "nCx"); nota("giro", "nGiro");
+  for (const a of itens) a.score = 0.45 * a.nVal + 0.30 * a.nCx + 0.25 * a.nGiro;
+  [...itens].sort((x, y) => y.score - x.score).forEach((x, i) => x.rkgGeral = i + 1);
+  const porCat = {};
+  for (const a of itens) (porCat[a.cat] ??= []).push(a);
+  for (const lst of Object.values(porCat))
+    lst.sort((x, y) => y.score - x.score).forEach((x, i) => x.rkgLinha = i + 1);
+  const rot = `${MESES[win[0].m - 1]}–${MESES[win[win.length - 1].m - 1]}/${String(win[win.length - 1].y).slice(2)}`;
+  return { itens, ativos, rot };
+}
+
+function renderCurva() {
+  if (!curvaLiberada()) { $("curva-conteudo").innerHTML = '<div class="empty">Visão restrita.</div>'; return; }
+  if (!MIX.cube) {
+    $("curva-conteudo").innerHTML = '<div class="empty">Carregando cubo de produtos…</div>';
+    carregarMix();
+    return;
+  }
+  const { itens, ativos, rot } = calcCurva();
+  // seletor de linha (preserva a seleção)
+  const cats = [...new Set(itens.map((a) => a.cat))].sort();
+  $("curva-linha").innerHTML = '<option value="">Todas as linhas</option>' +
+    cats.map((c) => `<option value="${esc(c)}"${c === CURVA.linha ? " selected" : ""}>${esc(c)}</option>`).join("");
+  let lista = CURVA.linha ? itens.filter((a) => a.cat === CURVA.linha) : [...itens];
+
+  const cols = [
+    { k: "cat", t: "CATEGORIA", str: 1, v: (x) => x.cat },
+    { k: "nome", t: "ITEM", str: 1, v: (x) => x.nome },
+    { k: "id", t: "ID", r: 1, v: (x) => +x.id || 0 },
+    { k: "ean", t: "EAN", str: 1, v: (x) => x.ean },
+    { k: "rkgLinha", t: "RKG LINHA", r: 1, v: (x) => x.rkgLinha },
+    { k: "rkgGeral", t: "RKG GERAL", r: 1, v: (x) => x.rkgGeral },
+    { k: "val", t: "VALOR ACUM. 6M", r: 1, v: (x) => x.val },
+    { k: "cx", t: "QTDE ACUM. 6M", r: 1, v: (x) => x.cx },
+    { k: "dist", t: "DISTRIBUIÇÃO", r: 1, v: (x) => x.dist },
+    { k: "score", t: "PONTUAÇÃO", r: 1, v: (x) => x.score },
+  ];
+  const cdef = cols.find((c) => c.k === CURVA.col) || cols[9];
+  lista.sort((a, b) => cdef.str
+    ? CURVA.dir * String(cdef.v(a)).localeCompare(String(cdef.v(b)), "pt-BR")
+    : CURVA.dir * (cdef.v(a) - cdef.v(b)));
+
+  const th = `<th class="r">#</th>` + cols.map((c) =>
+    `<th class="${c.r ? "r " : ""}ord${CURVA.col === c.k ? " ord-on" : ""}" data-k="${c.k}">${c.t}${CURVA.col === c.k ? (CURVA.dir < 0 ? " ▼" : " ▲") : ""}</th>`).join("");
+  const corpo = lista.map((a, i) =>
+    `<tr><td class="r"><b>${i + 1}</b></td>
+     <td style="font-size:10.5px;color:var(--mut)">${esc(a.cat)}</td>
+     <td style="white-space:nowrap"><b>${esc(a.nome)}</b></td>
+     <td class="r">${esc(a.id)}</td>
+     <td style="font-size:10.5px;color:var(--mut)">${esc(a.ean) || "—"}</td>
+     <td class="r">${a.rkgLinha}</td>
+     <td class="r">${a.rkgGeral}</td>
+     <td class="r">${fmtV(a.val)}</td>
+     <td class="r">${fmtBR(a.cx, 0)}</td>
+     <td class="r" title="${fmtBR(a.ncli)} de ${fmtBR(ativos)} clientes ativos">${fmtBR(a.ncli)} · ${fmtBR(a.dist * 100, 0)}%</td>
+     <td class="r" title="notas 0–100 → valor ${fmtBR(a.nVal, 0)} · caixas ${fmtBR(a.nCx, 0)} · giro/cliente ${fmtBR(a.nGiro, 0)} (${fmtBR(a.giro, 1)} cx/cli)">
+       <b style="color:var(--teal-d)">${fmtBR(a.score, 1)}</b></td></tr>`).join("");
+  $("curva-info").textContent =
+    `${lista.length} itens · janela ${rot} · base ativa ${fmtBR(ativos)} clientes · pesos 45/30/25 · passe o mouse na pontuação para ver as notas`;
+  $("curva-conteudo").innerHTML =
+    `<table class="fat-tab"><thead><tr>${th}</tr></thead><tbody>${corpo ||
+      '<tr><td colspan="11" class="empty">Sem itens.</td></tr>'}</tbody></table>`;
+  document.querySelectorAll("#curva-conteudo th.ord").forEach((h) => h.addEventListener("click", () => {
+    const k = h.dataset.k;
+    if (CURVA.col === k) CURVA.dir *= -1;
+    else { CURVA.col = k; CURVA.dir = ["cat", "nome", "ean", "rkgLinha", "rkgGeral"].includes(k) ? 1 : -1; }
+    renderCurva();
+  }));
+}
+
 /* ---------------- Volume/Mix: batalha naval itens × clientes ---------------- */
 const VOL = { abertos: {}, metrica: "cx", nCli: 18 };
 
@@ -1858,6 +1988,10 @@ document.addEventListener("DOMContentLoaded", () => {
     b.addEventListener("click", () => periodoRapido(b.dataset.q)));
   document.querySelectorAll("#estr-btns button").forEach((b) =>
     b.addEventListener("click", () => filtrarEstr(b.dataset.e)));
+  if ($("curva-linha")) $("curva-linha").addEventListener("change", (e) => {
+    CURVA.linha = e.target.value;
+    renderCurva();
+  });
   // batalha naval: alternar métrica das células
   document.querySelectorAll("[data-vm]").forEach((b) => b.addEventListener("click", () => {
     VOL.metrica = b.dataset.vm;

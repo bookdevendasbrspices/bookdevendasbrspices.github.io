@@ -134,14 +134,15 @@ norm_pid = lambda s: str(s or "").strip().lstrip("0")
 
 
 def ler_produtos():
-    """Base de produtos do painel: ID → (categoria, família, produto, curva ABC)."""
+    """Base de produtos do painel: ID → (categoria, família, produto, curva ABC, EAN)."""
     df = pd.read_excel(os.path.join(BASE, "Ajustes_Base_Produtos.xlsx"),
-                       sheet_name="PRODUTOS", header=1, dtype={"ID_PRODUTO": str})
+                       sheet_name="PRODUTOS", header=1, dtype={"ID_PRODUTO": str, "EAN-13": str})
     df = df[df["ID_PRODUTO"].notna()].copy()
-    for c in ["CATEGORIA PAINEL", "FAMILIA PAINEL", "PRODUTOS PAINEL", "CURVA DE VENDAS"]:
+    for c in ["CATEGORIA PAINEL", "FAMILIA PAINEL", "PRODUTOS PAINEL", "CURVA DE VENDAS", "EAN-13"]:
         df[c] = df[c].fillna("").astype(str).str.strip()
     return {norm_pid(r["ID_PRODUTO"]): (r["CATEGORIA PAINEL"], r["FAMILIA PAINEL"],
-                                        r["PRODUTOS PAINEL"], r["CURVA DE VENDAS"])
+                                        r["PRODUTOS PAINEL"], r["CURVA DE VENDAS"],
+                                        r["EAN-13"].split(".")[0])
             for _, r in df.iterrows()}
 
 
@@ -353,7 +354,11 @@ def main():
                    [METAS_EMPRESA_S2[m] for m in range(7, 13)]
 
     # ================= cubo MIX (categorias × cliente e produtos × vendedor) =================
-    pinfo = lambda pid: prod_info.get(pid, ("", "", "", ""))
+    pinfo = lambda pid: prod_info.get(pid, ("", "", "", "", ""))
+    # identificação dos itens (ID + EAN) por nome de produto do painel — p/ a guia Curva A
+    prod_ids = {}
+    for pid, (cat, fam, prodp, curva, ean) in prod_info.items():
+        prod_ids.setdefault(prodp or f"ID {pid}", {"id": pid, "ean": ean})
     fat["PID"] = fat["ID_PRODUTO"].map(norm_pid)
     fat["CAT"] = fat["PID"].map(lambda p: pinfo(p)[0] or "OUTROS")
     fat["PRODP"] = [pinfo(p)[2] or str(n).strip() for p, n in zip(fat["PID"], fat["NOME PRODUTO"])]
@@ -446,7 +451,7 @@ def main():
     tab = fj30.groupby(["FAMP", "BAND"])["TOTAL"].sum().unstack(fill_value=0.0) \
               .reindex(columns=top30.index, fill_value=0.0)
     fam_cat = {}
-    for cat, famp, _, _ in prod_info.values():
+    for cat, famp, _, _, _ in prod_info.values():
         fam_cat.setdefault(famp, cat)
     ws_lista = []
     for famp, linha in tab.iterrows():
@@ -564,7 +569,7 @@ def main():
             ncli_prod = {p: len(bs & bands_escopo) for p, bs in prod_cli6.items()
                          if len(bs & bands_escopo)}
             mix_entries[kv_key] = json.dumps({"mes_atual": mes_atual, "cats": mc, "prods": mp,
-                                              "ncli_prod": ncli_prod},
+                                              "ncli_prod": ncli_prod, "ids": prod_ids},
                                              ensure_ascii=False, separators=(",", ":"))
 
         chave = f"{perfil}|{nome}"
