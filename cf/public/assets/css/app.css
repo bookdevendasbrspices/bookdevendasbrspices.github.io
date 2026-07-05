@@ -238,7 +238,23 @@ h2.pg::before{content:"";width:9px;height:9px;background:var(--teal);transform:r
   overflow:hidden;text-overflow:ellipsis}
 .vol-tab th.vufh{font-size:8.5px;padding:3px 5px;text-align:center;background:rgba(47,125,124,.85)}
 #vol-info .fchip{cursor:pointer}
-.vfoto{height:26px;border-radius:4px;display:inline-block;vertical-align:middle}
+.vfoto{height:26px;display:inline-block;vertical-align:middle;cursor:zoom-in}
+/* preview flutuante da foto (hover) */
+#foto-zoom{position:fixed;z-index:80;display:none;background:#fff;border:1px solid #dfe5e4;
+  border-radius:10px;box-shadow:0 10px 30px rgba(24,58,63,.28);padding:10px 12px;
+  pointer-events:none;text-align:center}
+#foto-zoom.on{display:block}
+#foto-zoom img{height:200px;display:block;margin:0 auto}
+#foto-zoom .fz-nome{margin-top:6px;font-size:10.5px;font-weight:600;color:var(--ink);max-width:230px}
+/* foto ampliada (clique) */
+#foto-modal{position:fixed;inset:0;z-index:90;display:none;background:rgba(16,38,42,.55);
+  align-items:center;justify-content:center;cursor:zoom-out}
+#foto-modal.on{display:flex}
+#foto-modal .fm-card{background:#fff;border-radius:14px;padding:22px 26px;text-align:center;
+  box-shadow:0 18px 50px rgba(0,0,0,.35);max-width:min(480px,90vw)}
+#foto-modal .fm-card img{height:min(340px,60vh);max-width:100%;object-fit:contain}
+#foto-modal .fm-nome{margin-top:10px;font-size:13px;font-weight:700;color:var(--ink)}
+#foto-modal .fm-dica{margin-top:4px;font-size:10px;color:var(--mut)}
 /* resumo por cliente ACIMA da barra (QTDE DE ITENS / CURVA A / INOVAÇÃO / QUERO) */
 .vol-tab tr.vol-sumh th{background:#2c4f56;color:#e8f1f1;font-size:9px;padding:3px 5px;
   text-align:center;font-weight:600;border-right:1px solid rgba(255,255,255,.18);letter-spacing:.03em}

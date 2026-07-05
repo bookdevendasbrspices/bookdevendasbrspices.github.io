@@ -1975,15 +1975,87 @@ function carregarCurvaOficial() {
     })
     .catch(() => {});
 }
-/* miniatura das fotos do Excel (reduz p/ 26px de altura, JPEG leve) */
+/* miniatura das fotos do Excel: h=200 (dá zoom), fundo removido, WebP com alfa */
 async function miniatura(buf, ext) {
   const blob = new Blob([buf], { type: "image/" + (ext === "jpg" ? "jpeg" : (ext || "png")) });
   const bmp = await createImageBitmap(blob);
-  const h = 26, w = Math.max(1, Math.round(bmp.width * h / bmp.height));
+  const h = 200, w = Math.max(1, Math.round(bmp.width * h / bmp.height));
   const cv = document.createElement("canvas");
   cv.width = w; cv.height = h;
-  cv.getContext("2d").drawImage(bmp, 0, 0, w, h);
-  return cv.toDataURL("image/jpeg", 0.72);
+  const ctx = cv.getContext("2d");
+  ctx.drawImage(bmp, 0, 0, w, h);
+  try { removerFundoFoto(ctx, w, h); } catch (e) { /* sem transparência, segue com a foto normal */ }
+  const out = cv.toDataURL("image/webp", 0.8);
+  return out.startsWith("data:image/webp") ? out : cv.toDataURL("image/png");
+}
+/* fundo da foto -> transparente: flood fill a partir das 4 bordas sobre a cor dominante da borda */
+function removerFundoFoto(ctx, w, h) {
+  const img = ctx.getImageData(0, 0, w, h), d = img.data;
+  const cor = (x, y) => { const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+  const amostra = [];
+  for (let x = 0; x < w; x++) amostra.push(cor(x, 0), cor(x, h - 1));
+  for (let y = 0; y < h; y++) amostra.push(cor(0, y), cor(w - 1, y));
+  const bg = [0, 1, 2].map((c) => amostra.map((p) => p[c]).sort((a, b) => a - b)[amostra.length >> 1]);
+  const TOL = 90;                       // soma das diferenças RGB p/ contar como fundo
+  const ehFundo = (i) => Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) <= TOL;
+  const visto = new Uint8Array(w * h), fila = [];
+  const poe = (x, y) => { const p = y * w + x; if (!visto[p] && ehFundo(p * 4)) { visto[p] = 1; fila.push(p); } };
+  for (let x = 0; x < w; x++) { poe(x, 0); poe(x, h - 1); }
+  for (let y = 0; y < h; y++) { poe(0, y); poe(w - 1, y); }
+  while (fila.length) {
+    const p = fila.pop(), x = p % w, y = (p / w) | 0;
+    d[p * 4 + 3] = 0;
+    if (x > 0) poe(x - 1, y);
+    if (x < w - 1) poe(x + 1, y);
+    if (y > 0) poe(x, y - 1);
+    if (y < h - 1) poe(x, y + 1);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+/* ---------- fotos da matriz: hover = preview flutuante; clique = ampliada (lightbox) ---------- */
+function instalarFotoZoom() {
+  const zoomEl = document.createElement("div");
+  zoomEl.id = "foto-zoom";
+  document.body.appendChild(zoomEl);
+  const posiciona = (e) => {
+    const m = 14, w = zoomEl.offsetWidth || 240, h = zoomEl.offsetHeight || 240;
+    let x = e.clientX + m, y = e.clientY - h / 2;
+    if (x + w > innerWidth - 8) x = e.clientX - w - m;
+    y = Math.max(8, Math.min(y, innerHeight - h - 8));
+    zoomEl.style.left = x + "px";
+    zoomEl.style.top = y + "px";
+  };
+  document.addEventListener("mouseover", (e) => {
+    const im = e.target.closest?.("img.vfoto");
+    if (!im) return;
+    zoomEl.innerHTML = `<img src="${im.src}" alt="">` +
+      (im.dataset.nm ? `<div class="fz-nome">${esc(im.dataset.nm)}</div>` : "");
+    zoomEl.classList.add("on");
+    posiciona(e);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (zoomEl.classList.contains("on")) posiciona(e);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (e.target.closest?.("img.vfoto")) zoomEl.classList.remove("on");
+  });
+  document.addEventListener("click", (e) => {
+    const im = e.target.closest?.("img.vfoto");
+    if (!im) return;
+    zoomEl.classList.remove("on");
+    let modal = $("foto-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "foto-modal";
+      modal.addEventListener("click", () => modal.classList.remove("on"));
+      document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") modal.classList.remove("on"); });
+      document.body.appendChild(modal);
+    }
+    modal.innerHTML = `<div class="fm-card"><img src="${im.src}" alt="">` +
+      (im.dataset.nm ? `<div class="fm-nome">${esc(im.dataset.nm)}</div>` : "") +
+      `<div class="fm-dica">clique em qualquer lugar para fechar</div></div>`;
+    modal.classList.add("on");
+  });
 }
 function renderCurvaOficial() {
   const reg = CURVA.oficial;
@@ -2405,7 +2477,7 @@ function renderVol() {
     corpo += `<tr class="vol-prod">
       <td class="volfix"><span class="vlinha" style="background:${corLinha(it.linha)}">${esc(it.linha || "—")}</span>
         ${esc(it.item)}</td>` +
-      (temFoto ? `<td style="text-align:center">${it.foto ? `<img class="vfoto" src="${it.foto}" alt="">` : ""}</td>` : "") +
+      (temFoto ? `<td style="text-align:center">${it.foto ? `<img class="vfoto" src="${it.foto}" data-nm="${esc(it.item)}" alt="">` : ""}</td>` : "") +
       `<td class="r" style="font-size:10px">${esc(it.sku || "—")}</td>
       <td class="r" style="font-size:9.5px;color:var(--mut)">${esc(it.ean || "—")}</td>
       <td style="text-align:center">${it.curva ? seloCurva(it.curva) : "—"}</td>
@@ -2496,6 +2568,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (f) processarUploadCurva(f);
     e.target.value = "";
   });
+  instalarFotoZoom();   // fotos da matriz: hover amplia, clique abre em destaque
+
   // batalha naval: alternar métrica das células
   document.querySelectorAll("[data-vm]").forEach((b) => b.addEventListener("click", () => {
     VOL.metrica = b.dataset.vm;
