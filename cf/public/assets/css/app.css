@@ -198,6 +198,23 @@ h2.pg::before{content:"";width:9px;height:9px;background:var(--teal);transform:r
 @keyframes barGrow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
+/* batalha naval (Volume/Mix): matriz itens × clientes */
+.vol-tab{table-layout:auto}
+.vol-tab th.vcol{height:96px;vertical-align:bottom;padding:6px 4px;min-width:56px}
+.vol-tab th.vcol span{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;
+  font-size:9.5px;letter-spacing:.02em;max-height:86px;overflow:hidden}
+.vol-tab .volfix{position:sticky;left:0;background:#fff;z-index:3;min-width:210px;max-width:250px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:2px 0 4px -2px rgba(0,0,0,.12)}
+.vol-tab th.volfix{background:linear-gradient(180deg,var(--aqua),var(--teal-d));z-index:4}
+.vol-tab tr.vol-cat{cursor:pointer}
+.vol-tab tr.vol-cat td{background:#eef4f4;font-weight:600}
+.vol-tab tr.vol-cat td.volfix{background:#e6efef}
+.vol-tab tr.vol-cat:hover td{background:#e2edec}
+.vol-tab td.vc{font-variant-numeric:tabular-nums;font-size:10.5px;min-width:56px}
+.vol-tab td.vz{text-align:center;color:#d3dadb;min-width:56px}
+.vol-tab tr.vol-prod td{font-size:10.5px}
+.vol-tab tr.fat-total td.volfix{color:#fff}
+
 /* selo da curva ABC */
 .curva{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
   border-radius:6px;font-size:10.5px;font-weight:800}

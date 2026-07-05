@@ -263,8 +263,17 @@
     <!-- ========== VOLUME / MIX (batalha naval) ========== -->
     <section class="view" id="v-vol">
       <h2 class="pg">Volume / Mix por item</h2>
-      <div class="sub">Itens (linhas, por categoria e curva ABC de venda) × clientes (colunas) — caixas, valor e representatividade no período. Do macro ao micro.</div>
-      <div class="card"><div id="vol-conteudo"><div class="empty">Carregando…</div></div></div>
+      <div class="sub">Batalha naval: itens (linhas, por categoria e curva ABC) × clientes (colunas) — clique na categoria
+        para abrir os produtos. A cor da célula mostra a intensidade; passe o mouse para ver caixas, valor e
+        representatividade. Segue o período e todos os filtros.</div>
+      <div class="card">
+        <div class="tctl">
+          <span class="fchip on" data-vm="cx" id="vol-cx">Caixas</span>
+          <span class="fchip" data-vm="val" id="vol-val">Valor</span>
+          <span style="margin-left:auto;color:var(--soft);font-size:11.5px" id="vol-info"></span>
+        </div>
+        <div id="vol-conteudo"><div class="empty">Carregando…</div></div>
+      </div>
     </section>
   </main>
 

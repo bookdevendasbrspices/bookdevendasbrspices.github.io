@@ -389,6 +389,7 @@ function renderAll() {
   renderPositivados(rows);
   if (FAT.cube && $("v-fat").classList.contains("on")) desenharFat();
   if ($("v-basket").classList.contains("on")) renderBasket();
+  if ($("v-vol").classList.contains("on")) renderVol();
 }
 
 /* cross-filter: clicar filtra a página toda; clicar de novo desfaz */
@@ -1742,10 +1743,93 @@ function renderBasket() {
     "</tbody></table>";
 }
 
+/* ---------------- Volume/Mix: batalha naval itens × clientes ---------------- */
+const VOL = { abertos: {}, metrica: "cx", nCli: 18 };
+
 function renderVol() {
-  $("vol-conteudo").innerHTML = emConstrucao("Volume / Mix — visão “batalha naval”",
-    "Matriz do macro ao micro: <b>itens nas linhas</b> (agrupados por categoria e ordenados pelo volume total da empresa, " +
-    "com a <b>curva ABC</b>) × <b>clientes nas colunas</b> (cliente/estado). Em cada célula: caixas no período, valor e representatividade.");
+  if (!MIX.cube) {
+    $("vol-conteudo").innerHTML = '<div class="empty">Carregando cubo de produtos…</div>';
+    carregarMix();
+    return;
+  }
+  const meses = mesesSel();
+  const escopo = new Set(linhas().map((p) => p.cliente));
+  let r = MIX.cube.prods.filter((p) => escopo.has(p.cliente));
+  if (S.fCat) r = r.filter((p) => p.cat === S.fCat);
+  if (S.fProd) r = r.filter((p) => p.prod === S.fProd);
+  const cxP = (e) => somaMeses(e.q26, meses);
+  const valP = (e) => somaMeses(e.m26, meses);
+  const met = VOL.metrica === "cx" ? cxP : valP;
+  const fmtCel = (v) => VOL.metrica === "cx" ? fmtBR(v, 0) : fmtV(v);
+
+  // top clientes (colunas) pela métrica no período
+  const porCli = {};
+  for (const p of r) porCli[p.cliente] = (porCli[p.cliente] || 0) + met(p);
+  const clis = Object.entries(porCli).filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]).slice(0, VOL.nCli).map(([n]) => n);
+  const cliSet = new Set(clis);
+
+  // categoria → produtos → células por cliente (guarda cx E valor p/ o tooltip)
+  const cats = {};
+  for (const p of r) {
+    const cx = cxP(p), vl = valP(p);
+    if (!cx && !vl) continue;
+    const cat = (cats[p.cat] ??= { nome: p.cat, tot: 0, cli: {}, prods: {} });
+    cat.tot += met(p);
+    const pr = (cat.prods[p.prod] ??= { nome: p.prod, curva: p.curva, tot: 0, cli: {} });
+    pr.tot += met(p);
+    if (cliSet.has(p.cliente)) {
+      const cc = (cat.cli[p.cliente] ??= { m: 0, cx: 0, vl: 0 });
+      cc.m += met(p); cc.cx += cx; cc.vl += vl;
+      const pc = (pr.cli[p.cliente] ??= { m: 0, cx: 0, vl: 0 });
+      pc.m += met(p); pc.cx += cx; pc.vl += vl;
+    }
+  }
+  const catList = Object.values(cats).filter((c) => c.tot > 0).sort((a, b) => b.tot - a.tot);
+
+  const celula = (obj, max, rotLinha, cliente) => {
+    if (!obj || !obj.m) return '<td class="vz">·</td>';
+    const a = 0.08 + 0.55 * Math.min(1, obj.m / (max || 1));
+    const repr = porCli[cliente] ? obj.m / porCli[cliente] : 0;
+    return `<td class="r vc" style="background:rgba(47,125,124,${a.toFixed(2)})"
+      title="${esc(cliente)} × ${esc(rotLinha)}: ${fmtBR(obj.cx, 0)} cx · ${fmtV(obj.vl)} · ${fmtBR(repr * 100, 1)}% do cliente">${fmtCel(obj.m)}</td>`;
+  };
+
+  const th = `<th class="volfix">CATEGORIA / PRODUTO</th><th class="r">TOTAL</th>` +
+    clis.map((c) => `<th class="vcol" title="${esc(c)}"><span>${esc(c.length > 16 ? c.slice(0, 15) + "…" : c)}</span></th>`).join("");
+  let corpo = "";
+  for (const cat of catList) {
+    const aberto = !!VOL.abertos[cat.nome];
+    const maxCat = Math.max(1, ...clis.map((c) => cat.cli[c]?.m || 0));
+    corpo += `<tr class="vol-cat" data-cat="${esc(cat.nome)}">
+      <td class="volfix"><span class="fat-exp">${aberto ? "▾" : "▸"}</span> <b>${esc(rotuloCat(cat.nome))}</b></td>
+      <td class="r"><b>${fmtCel(cat.tot)}</b></td>` +
+      clis.map((c) => celula(cat.cli[c], maxCat, rotuloCat(cat.nome), c)).join("") + "</tr>";
+    if (aberto) {
+      const prods = Object.values(cat.prods).filter((p) => p.tot > 0).sort((a, b) => b.tot - a.tot);
+      for (const pr of prods) {
+        const maxP = Math.max(1, ...clis.map((c) => pr.cli[c]?.m || 0));
+        corpo += `<tr class="vol-prod">
+          <td class="volfix" style="padding-left:24px">${pr.curva ? `<span class="curva c-${esc(pr.curva)}">${esc(pr.curva)}</span> ` : ""}${esc(pr.nome)}</td>
+          <td class="r">${fmtCel(pr.tot)}</td>` +
+          clis.map((c) => celula(pr.cli[c], maxP, pr.nome, c)).join("") + "</tr>";
+      }
+    }
+  }
+  // linha TOTAL por cliente
+  corpo += `<tr class="fat-total"><td class="volfix" style="background:var(--ink)"><b>TOTAL</b></td>
+    <td class="r"><b>${fmtCel(catList.reduce((s, c) => s + c.tot, 0))}</b></td>` +
+    clis.map((c) => `<td class="r"><b>${fmtCel(porCli[c] || 0)}</b></td>`).join("") + "</tr>";
+
+  $("vol-info").textContent =
+    `top ${clis.length} clientes por ${VOL.metrica === "cx" ? "caixas" : "valor"} · ${rotuloPer()} · clique na categoria para abrir os itens`;
+  $("vol-conteudo").innerHTML =
+    `<div class="twrap"><table class="fat-tab vol-tab"><thead><tr>${th}</tr></thead><tbody>${corpo ||
+      `<tr><td class="empty">Sem dados na seleção.</td></tr>`}</tbody></table></div>`;
+  document.querySelectorAll(".vol-tab tr.vol-cat").forEach((row) => row.addEventListener("click", () => {
+    VOL.abertos[row.dataset.cat] = !VOL.abertos[row.dataset.cat];
+    renderVol();
+  }));
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1774,6 +1858,12 @@ document.addEventListener("DOMContentLoaded", () => {
     b.addEventListener("click", () => periodoRapido(b.dataset.q)));
   document.querySelectorAll("#estr-btns button").forEach((b) =>
     b.addEventListener("click", () => filtrarEstr(b.dataset.e)));
+  // batalha naval: alternar métrica das células
+  document.querySelectorAll("[data-vm]").forEach((b) => b.addEventListener("click", () => {
+    VOL.metrica = b.dataset.vm;
+    document.querySelectorAll("[data-vm]").forEach((x) => x.classList.toggle("on", x.dataset.vm === VOL.metrica));
+    renderVol();
+  }));
 
   // rodapé: modo de números + atualizar + baixar
   const rotuloNum = () => $("btn-num").textContent =
