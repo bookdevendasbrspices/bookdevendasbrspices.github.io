@@ -1770,7 +1770,7 @@ function renderBasket() {
 }
 
 /* ---------------- Curva A · Mix (RESTRITO — apoio à definição manual trimestral) ---------------- */
-const CURVA = { col: "score", dir: -1, linha: "", canais: [] };
+const CURVA = { col: "score", dir: -1, linhas: null, canais: [] };   // linhas: null = todas
 const curvaLiberada = () => {
   if (!S.data) return false;
   const eu = (S.data.escopo.email || S.data.escopo.login || "").toLowerCase();
@@ -1792,6 +1792,7 @@ function calcCurva() {
   const cliSet = CURVA.canais.length ? new Set(cliBase.map((p) => p.cliente)) : null;
   const agg = {};
   for (const p of MIX.cube.prods) {
+    if (CURVA.linhas && !CURVA.linhas.includes(p.cat)) continue;   // linhas desmarcadas ficam FORA da análise
     if (cliSet && !cliSet.has(p.cliente)) continue;
     const v = somaW(p, "m25", "m26"), c = somaW(p, "q25", "q26");
     if (v <= 0 && c <= 0) continue;
@@ -1863,6 +1864,25 @@ function seloCurva(c) {
   if (["A", "B", "C", "D", "DELIST"].includes(s)) return `<span class="curva c-${s}">${s}</span>`;
   if (s.includes("LÇT") || s.includes("LCT") || s.includes("LAN")) return `<span class="curva c-LCT">${esc(s)}</span>`;
   return `<span class="curva c-X">${esc(s)}</span>`;
+}
+
+/* janela de linhas (categorias) com checkboxes — desmarcar EXCLUI a linha da análise */
+function montarLinhasCurva(cats) {
+  const el = $("curva-linha-lista");
+  if (el.dataset.pronto !== cats.join("|")) {
+    el.dataset.pronto = cats.join("|");
+    el.innerHTML = cats.map((c) =>
+      `<label class="permes" style="text-transform:none"><input type="checkbox" data-cat="${esc(c)}"><span>${esc(c)}</span></label>`).join("");
+    el.querySelectorAll("input").forEach((cb) => cb.addEventListener("change", () => {
+      const sel = [...el.querySelectorAll("input:checked")].map((x) => x.dataset.cat);
+      CURVA.linhas = sel.length === cats.length ? null : sel;
+      renderCurva();
+    }));
+  }
+  el.querySelectorAll("input").forEach((cb) =>
+    cb.checked = !CURVA.linhas || CURVA.linhas.includes(cb.dataset.cat));
+  const total = cats.length, n = !CURVA.linhas ? total : CURVA.linhas.length;
+  $("curva-linha-btn").textContent = n === total ? "Todas as linhas" : `${n} de ${total} linhas`;
 }
 
 /* base OFICIAL (definição manual enviada por upload) — casa por ID, com nome como reserva */
@@ -1977,10 +1997,8 @@ function renderCurva() {
   }
   carregarCurvaOficial();
   const { itens, ativos, rot } = calcCurva();
-  // seletor de linha (preserva a seleção)
-  const cats = [...new Set(itens.map((a) => a.cat))].sort();
-  $("curva-linha").innerHTML = '<option value="">Todas as linhas</option>' +
-    cats.map((c) => `<option value="${esc(c)}"${c === CURVA.linha ? " selected" : ""}>${esc(c)}</option>`).join("");
+  // janela de LINHAS com checkboxes (lista completa, mesmo as desmarcadas)
+  montarLinhasCurva([...new Set(MIX.cube.prods.map((p) => p.cat))].sort());
   // botões de VENDA POR CANAL (múltipla seleção)
   const canaisTodos = [...new Set(S.data.clientes.map((p) => p.canal || "SEM CANAL"))].sort();
   $("curva-canais").innerHTML = canaisTodos.map((c) =>
@@ -1991,7 +2009,7 @@ function renderCurva() {
     CURVA.canais = CURVA.canais.includes(c) ? CURVA.canais.filter((x) => x !== c) : [...CURVA.canais, c];
     renderCurva();
   }));
-  let lista = CURVA.linha ? itens.filter((a) => a.cat === CURVA.linha) : [...itens];
+  let lista = [...itens];   // o recorte de linhas já aconteceu DENTRO da análise (calcCurva)
 
   const cols = [
     { k: "cat", t: "CATEGORIA", str: 1, v: (x) => x.cat },
@@ -2044,6 +2062,7 @@ function renderCurva() {
   const nExp = itens.filter((a) => a.acao === "EXPANDIR").length;
   $("curva-info").textContent =
     `${lista.length} itens · janela ${rot} · base ativa ${fmtBR(ativos)} clientes` +
+    (CURVA.linhas ? ` · ${CURVA.linhas.length} linha(s) na análise` : "") +
     (CURVA.canais.length ? ` · canais: ${CURVA.canais.join(" + ")}` : "") +
     ` · curva A = ${nA} itens (80% do valor) · ${nExp} p/ EXPANDIR · pesos 45/30/25`;
   $("curva-conteudo").innerHTML =
@@ -2173,10 +2192,13 @@ document.addEventListener("DOMContentLoaded", () => {
     b.addEventListener("click", () => periodoRapido(b.dataset.q)));
   document.querySelectorAll("#estr-btns button").forEach((b) =>
     b.addEventListener("click", () => filtrarEstr(b.dataset.e)));
-  if ($("curva-linha")) $("curva-linha").addEventListener("change", (e) => {
-    CURVA.linha = e.target.value;
-    renderCurva();
-  });
+  if ($("curva-linha-btn")) {
+    $("curva-linha-btn").addEventListener("click", (e) => { e.stopPropagation(); $("curva-linha-panel").classList.toggle("on"); });
+    $("curva-linha-panel").addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => $("curva-linha-panel").classList.remove("on"));
+    $("cl-todas").addEventListener("click", () => { CURVA.linhas = null; renderCurva(); });
+    $("cl-limpar").addEventListener("click", () => { CURVA.linhas = []; renderCurva(); });
+  }
   if ($("curva-upload")) $("curva-upload").addEventListener("change", (e) => {
     const f = e.target.files[0];
     if (f) processarUploadCurva(f);
