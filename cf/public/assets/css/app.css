@@ -159,7 +159,9 @@ label.permes{display:flex;align-items:center;gap:7px;padding:3.5px 6px;border-ra
   font-size:11px;font-weight:500;letter-spacing:.01em;color:var(--txt);cursor:pointer;
   text-transform:capitalize}
 label.permes:hover{background:#f2f5f5}
-.permes input{width:13px;height:13px;flex:none;accent-color:var(--teal-d);cursor:pointer}
+label.permes input{width:13px;height:13px;min-width:0;padding:0;margin:0;flex:none;
+  background:none;border:none;accent-color:var(--teal-d);cursor:pointer}
+label.permes span{white-space:nowrap}
 
 /* títulos */
 h2.pg{font-size:20px;letter-spacing:-.02em;margin:4px 0 2px;display:flex;align-items:center;gap:10px}
