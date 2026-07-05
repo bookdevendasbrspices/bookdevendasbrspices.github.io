@@ -1341,15 +1341,18 @@ async function exportExcel() {
       }
       const { itens, ativos, rot } = calcCurva();
       itens.sort((a, b) => a.rkgGeral - b.rkgGeral);
-      xlTabela(ws, `Curva A · Mix campeão — ${rot} · base ativa ${ativos} clientes · pesos 45/30/25`,
+      xlTabela(ws, `Curva A · Mix campeão — ${rot} · base ativa ${ativos} clientes · pesos 45/30/25` +
+        (CURVA.canais.length ? ` · canais: ${CURVA.canais.join(" + ")}` : ""),
         ["RKG GERAL", "CATEGORIA", "ITEM", "ID", "EAN", "RKG LINHA",
-         "Valor acum. 6m", "Qtde acum. 6m", "Clientes", "Distribuição", "Nota valor", "Nota caixas", "Nota giro", "PONTUAÇÃO"],
+         "Valor acum. 6m", "Qtde acum. 6m", "Clientes", "Distribuição",
+         "Nota valor", "Nota caixas", "Nota giro", "PONTUAÇÃO", "CURVA", "MIX PRIORITÁRIO"],
         itens.map((a) => [a.rkgGeral, a.cat, a.nome, a.id, a.ean, a.rkgLinha,
           Math.round(a.val), Math.round(a.cx), a.ncli, a.dist,
-          Math.round(a.nVal), Math.round(a.nCx), Math.round(a.nGiro), Math.round(a.score * 10) / 10]),
+          Math.round(a.nVal), Math.round(a.nCx), Math.round(a.nGiro), Math.round(a.score * 10) / 10,
+          a.curvaSug, a.acao]),
         [XL.num, null, null, null, null, XL.num, XL.money, XL.num, XL.num, XL.pct,
-         XL.num, XL.num, XL.num, "0.0"],
-        [9, 22, 36, 8, 15, 9, 14, 12, 9, 11, 9, 9, 9, 11]);
+         XL.num, XL.num, XL.num, "0.0", null, null],
+        [9, 22, 36, 8, 15, 9, 14, 12, 9, 11, 9, 9, 9, 11, 7, 15]);
 
     } else if (v === "metas") {
       const nivel = (S.data.escopo.perfil === "gestor" && !S.fGer && !S.fVend) ? "ger"
@@ -1766,7 +1769,7 @@ function renderBasket() {
 }
 
 /* ---------------- Curva A · Mix (RESTRITO — apoio à definição manual trimestral) ---------------- */
-const CURVA = { col: "score", dir: -1, linha: "" };
+const CURVA = { col: "score", dir: -1, linha: "", canais: [] };
 const curvaLiberada = () => {
   if (!S.data) return false;
   const eu = (S.data.escopo.email || S.data.escopo.login || "").toLowerCase();
@@ -1774,22 +1777,28 @@ const curvaLiberada = () => {
 };
 
 function calcCurva() {
-  // janela: últimos 6 meses FECHADOS — base EMPRESA inteira (ignora os filtros da barra)
+  // janela: últimos 6 meses FECHADOS — base EMPRESA inteira (ignora os filtros da barra);
+  // botões de CANAL (múltipla seleção) recortam a base de clientes da análise
   const { ano, mes_atual } = S.data.periodo;
   const baseIdx = ano * 12 + (mes_atual - 1);
   const win = [];
   for (let k = 6; k >= 1; k--) { const i = baseIdx - k; win.push({ y: Math.floor(i / 12), m: (i % 12) + 1 }); }
   const somaW = (e, c25, c26) => win.reduce((s, p) =>
     s + (((p.y === 2026 ? e[c26] : p.y === 2025 ? e[c25] : null) || [])[p.m - 1] || 0), 0);
+  const cliBase = CURVA.canais.length
+    ? S.data.clientes.filter((p) => CURVA.canais.includes(p.canal || "SEM CANAL"))
+    : S.data.clientes;
+  const cliSet = CURVA.canais.length ? new Set(cliBase.map((p) => p.cliente)) : null;
   const agg = {};
   for (const p of MIX.cube.prods) {
+    if (cliSet && !cliSet.has(p.cliente)) continue;
     const v = somaW(p, "m25", "m26"), c = somaW(p, "q25", "q26");
     if (v <= 0 && c <= 0) continue;
     const a = (agg[p.prod] ??= { nome: p.prod, cat: p.cat, val: 0, cx: 0, cli: new Set() });
     a.val += v; a.cx += c; a.cli.add(p.cliente);
   }
   const ids = MIX.cube.ids || {};
-  const ativos = S.data.clientes.filter(ativo6).length || 1;
+  const ativos = cliBase.filter(ativo6).length || 1;
   const itens = Object.values(agg).filter((a) => a.val > 0);
   for (const a of itens) {
     a.ncli = a.cli.size;
@@ -1810,9 +1819,26 @@ function calcCurva() {
   for (const a of itens) (porCat[a.cat] ??= []).push(a);
   for (const lst of Object.values(porCat))
     lst.sort((x, y) => y.score - x.score).forEach((x, i) => x.rkgLinha = i + 1);
+  // CURVA SUGERIDA: ordena pela pontuação e corta pelo valor acumulado (A ≤80% · B ≤95% · C resto)
+  const ordScore = [...itens].sort((x, y) => y.score - x.score);
+  const valTotal = ordScore.reduce((s, a) => s + a.val, 0) || 1;
+  let acum = 0;
+  for (const a of ordScore) {
+    const antes = acum;
+    acum += a.val;
+    a.curvaSug = antes < 0.80 * valTotal ? "A" : antes < 0.95 * valTotal ? "B" : "C";
+  }
+  // MIX PRIORITÁRIO (ação sugerida): distribuição decide o que fazer com cada A
+  for (const a of itens) {
+    a.acao = a.curvaSug === "A" ? (a.dist < 0.40 ? "EXPANDIR" : "DEFENDER")
+      : a.curvaSug === "B" ? ((a.nGiro >= 75 && a.dist < 0.35) ? "TESTAR" : "MANTER")
+      : "CAUDA";
+  }
   const rot = `${MESES[win[0].m - 1]}–${MESES[win[win.length - 1].m - 1]}/${String(win[win.length - 1].y).slice(2)}`;
   return { itens, ativos, rot };
 }
+const CORES_ACAO = { EXPANDIR: "var(--ok)", DEFENDER: "var(--teal-d)", TESTAR: "#b57f22",
+                     MANTER: "var(--mut)", CAUDA: "var(--soft)" };
 
 function renderCurva() {
   if (!curvaLiberada()) { $("curva-conteudo").innerHTML = '<div class="empty">Visão restrita.</div>'; return; }
@@ -1826,6 +1852,16 @@ function renderCurva() {
   const cats = [...new Set(itens.map((a) => a.cat))].sort();
   $("curva-linha").innerHTML = '<option value="">Todas as linhas</option>' +
     cats.map((c) => `<option value="${esc(c)}"${c === CURVA.linha ? " selected" : ""}>${esc(c)}</option>`).join("");
+  // botões de VENDA POR CANAL (múltipla seleção)
+  const canaisTodos = [...new Set(S.data.clientes.map((p) => p.canal || "SEM CANAL"))].sort();
+  $("curva-canais").innerHTML = canaisTodos.map((c) =>
+    `<span class="fchip${CURVA.canais.includes(c) ? " on" : ""}" data-canal="${esc(c)}"
+       style="padding:3px 8px;font-size:9.5px">${esc(c)}</span>`).join("");
+  document.querySelectorAll("#curva-canais .fchip").forEach((b) => b.addEventListener("click", () => {
+    const c = b.dataset.canal;
+    CURVA.canais = CURVA.canais.includes(c) ? CURVA.canais.filter((x) => x !== c) : [...CURVA.canais, c];
+    renderCurva();
+  }));
   let lista = CURVA.linha ? itens.filter((a) => a.cat === CURVA.linha) : [...itens];
 
   const cols = [
@@ -1839,6 +1875,8 @@ function renderCurva() {
     { k: "cx", t: "QTDE ACUM. 6M", r: 1, v: (x) => x.cx },
     { k: "dist", t: "DISTRIBUIÇÃO", r: 1, v: (x) => x.dist },
     { k: "score", t: "PONTUAÇÃO", r: 1, v: (x) => x.score },
+    { k: "curvaSug", t: "CURVA", r: 1, v: (x) => ({ A: 3, B: 2, C: 1 })[x.curvaSug] },
+    { k: "acao", t: "MIX PRIORITÁRIO", str: 1, v: (x) => x.acao },
   ];
   const cdef = cols.find((c) => c.k === CURVA.col) || cols[9];
   lista.sort((a, b) => cdef.str
@@ -1859,12 +1897,18 @@ function renderCurva() {
      <td class="r">${fmtBR(a.cx, 0)}</td>
      <td class="r" title="${fmtBR(a.ncli)} de ${fmtBR(ativos)} clientes ativos">${fmtBR(a.ncli)} · ${fmtBR(a.dist * 100, 0)}%</td>
      <td class="r" title="notas 0–100 → valor ${fmtBR(a.nVal, 0)} · caixas ${fmtBR(a.nCx, 0)} · giro/cliente ${fmtBR(a.nGiro, 0)} (${fmtBR(a.giro, 1)} cx/cli)">
-       <b style="color:var(--teal-d)">${fmtBR(a.score, 1)}</b></td></tr>`).join("");
+       <b style="color:var(--teal-d)">${fmtBR(a.score, 1)}</b></td>
+     <td class="r"><span class="curva c-${esc(a.curvaSug)}">${a.curvaSug}</span></td>
+     <td style="font-size:10px;font-weight:700;color:${CORES_ACAO[a.acao]}">${a.acao}</td></tr>`).join("");
+  const nA = itens.filter((a) => a.curvaSug === "A").length;
+  const nExp = itens.filter((a) => a.acao === "EXPANDIR").length;
   $("curva-info").textContent =
-    `${lista.length} itens · janela ${rot} · base ativa ${fmtBR(ativos)} clientes · pesos 45/30/25 · passe o mouse na pontuação para ver as notas`;
+    `${lista.length} itens · janela ${rot} · base ativa ${fmtBR(ativos)} clientes` +
+    (CURVA.canais.length ? ` · canais: ${CURVA.canais.join(" + ")}` : "") +
+    ` · curva A = ${nA} itens (80% do valor) · ${nExp} p/ EXPANDIR · pesos 45/30/25`;
   $("curva-conteudo").innerHTML =
     `<table class="fat-tab"><thead><tr>${th}</tr></thead><tbody>${corpo ||
-      '<tr><td colspan="11" class="empty">Sem itens.</td></tr>'}</tbody></table>`;
+      '<tr><td colspan="13" class="empty">Sem itens.</td></tr>'}</tbody></table>`;
   document.querySelectorAll("#curva-conteudo th.ord").forEach((h) => h.addEventListener("click", () => {
     const k = h.dataset.k;
     if (CURVA.col === k) CURVA.dir *= -1;
