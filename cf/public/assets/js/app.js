@@ -1933,6 +1933,22 @@ function montarLinhasCurva(cats) {
   $("curva-linha-btn").textContent = n === total ? "Todas as linhas" : `${n} de ${total} linhas`;
 }
 
+async function postarBaseCurva(itens, msg) {
+  msg.innerHTML = `<div class="note">⏳ Gravando ${itens.length} itens como base oficial…</div>`;
+  const res = await fetch("/api/curva", { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ itens }) });
+  if (!res.ok) throw new Error("o servidor recusou a gravação (" + res.status + ")");
+  const j = await res.json();
+  CURVA.oficial = { itens, ts: j.ts };
+  msg.innerHTML = `<div class="note" style="background:#e8f6ee;border-color:#bfe3cd;color:#1d6b3f">
+    ✔ <b>Sistema atualizado!</b> Sua base com ${itens.length} itens é a regra vigente desde
+    ${new Date(j.ts).toLocaleString("pt-BR")} — curva, ranking por linha, grupos de revisão
+    ${itens.some((i) => i.foto) ? "e FOTOS" : ""} valem em todas as guias.</div>`;
+  renderCurva();
+  if ($("v-vol").classList.contains("on")) renderVol();
+  $("card-curva-oficial").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 /* base OFICIAL (definição manual enviada por upload) — casa por ID, com nome como reserva */
 function ofiDe(a) {
   const reg = CURVA.oficial;
@@ -1990,6 +2006,13 @@ async function processarUploadCurva(file) {
   const msg = $("curva-oficial-msg");
   msg.innerHTML = '<div class="note">⏳ Lendo o arquivo…</div>';
   try {
+    // payload já processado (ex.: gerado externamente com fotos extraídas)
+    if (/\.json$/i.test(file.name)) {
+      const body = JSON.parse(await file.text());
+      if (!body || !Array.isArray(body.itens) || !body.itens.length) throw new Error("JSON sem itens");
+      await postarBaseCurva(body.itens, msg);
+      return;
+    }
     const ExcelJS = await comExcelJS();
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await file.arrayBuffer());
@@ -2061,18 +2084,7 @@ async function processarUploadCurva(file) {
         acao: cel(m.acao).toUpperCase() });
     });
     if (!itens.length) throw new Error("nenhuma linha de item encontrada abaixo do cabeçalho");
-    msg.innerHTML = `<div class="note">⏳ Gravando ${itens.length} itens como base oficial…</div>`;
-    const res = await fetch("/api/curva", { method: "POST",
-      headers: { "content-type": "application/json" }, body: JSON.stringify({ itens }) });
-    if (!res.ok) throw new Error("o servidor recusou a gravação (" + res.status + ")");
-    const j = await res.json();
-    CURVA.oficial = { itens, ts: j.ts };
-    msg.innerHTML = `<div class="note" style="background:#e8f6ee;border-color:#bfe3cd;color:#1d6b3f">
-      ✔ <b>Sistema atualizado!</b> Sua base com ${itens.length} itens é a regra vigente desde
-      ${new Date(j.ts).toLocaleString("pt-BR")} — a <b>Curva de Vendas</b> e o <b>Ranking por Linha</b>
-      oficiais aparecem abaixo e nas colunas CURVA OFICIAL / RKG LINHA OFICIAL da análise.</div>`;
-    renderCurva();
-    $("card-curva-oficial").scrollIntoView({ behavior: "smooth", block: "start" });
+    await postarBaseCurva(itens, msg);
   } catch (e) {
     msg.innerHTML = `<div class="note" style="background:var(--bad-bg);border-color:#eec7c2;color:var(--bad)">
       ✖ Não consegui processar: ${esc(e.message || e)}. Use o Excel baixado desta guia (colunas ITEM, ID, RKG, CURVA, MIX PRIORITÁRIO).</div>`;

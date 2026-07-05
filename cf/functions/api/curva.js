@@ -14,9 +14,15 @@ export async function onRequestGet({ request, env }) {
 }
 
 export async function onRequestPost({ request, env }) {
-  const email = await emailSessao(request, env);
-  if (!email) return json({ erro: "nao_autenticado" }, 401);
-  if (email.toLowerCase() !== DONO) return json({ erro: "restrito" }, 403);
+  // via de manutenção: token secreto (env CURVA_TOKEN) permite gravar sem sessão de navegador
+  const token = request.headers.get("x-upload-token");
+  const tokenOk = token && env.CURVA_TOKEN && token === env.CURVA_TOKEN;
+  let email = "upload-token";
+  if (!tokenOk) {
+    email = await emailSessao(request, env);
+    if (!email) return json({ erro: "nao_autenticado" }, 401);
+    if (email.toLowerCase() !== DONO) return json({ erro: "restrito" }, 403);
+  }
   const body = await request.json().catch(() => null);
   if (!body || !Array.isArray(body.itens) || !body.itens.length || body.itens.length > 2000)
     return json({ erro: "formato_invalido" }, 400);
