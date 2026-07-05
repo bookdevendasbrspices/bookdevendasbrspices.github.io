@@ -388,6 +388,7 @@ function renderAll() {
   renderMetas(rows, meses);
   renderPositivados(rows);
   if (FAT.cube && $("v-fat").classList.contains("on")) desenharFat();
+  if ($("v-basket").classList.contains("on")) renderBasket();
 }
 
 /* cross-filter: clicar filtra a página toda; clicar de novo desfaz */
@@ -1129,7 +1130,7 @@ function dashRegioes(meses, porRegiao) {
 /* ---------------- exportação PDF / Excel ---------------- */
 const viewAtiva = () => document.querySelector(".view.on").id.slice(2);
 const NOMES_VIEW = { geral: "Dashboard", fat: "Faturamento", vol: "Volume / Mix",
-                     metas: "Metas vs Realizado", posit: "Positivados", rank: "Rankings" };
+                     basket: "Análise Basket", metas: "Metas vs Realizado", posit: "Positivados" };
 
 function contextoTxt() {
   const f = [];
@@ -1379,6 +1380,7 @@ function trocarView(v) {
   window.scrollTo({ top: 0 });
   if (v === "fat") renderFat();
   if (v === "vol") renderVol();
+  if (v === "basket") renderBasket();
 }
 
 /* placeholders informativos (conteúdo real vem na expansão do pipeline de dados) */
@@ -1625,6 +1627,121 @@ function celFat(m, base) {
   if (FAT.h6) cels += (m.h6 || []).map((p) => `<td class="r">${fmtV(p.v)}</td>`).join("");
   return cels;
 }
+/* ---------------- Análise Basket (cesta de produtos por cliente, 6 meses fechados) ---------------- */
+function renderBasket() {
+  if (!MIX.cube) {
+    $("basket-assoc").innerHTML = '<div class="empty">Carregando cubo de produtos…</div>';
+    carregarMix();
+    return;
+  }
+  const { ano, mes_atual } = S.data.periodo;
+  const baseIdx = ano * 12 + (mes_atual - 1);
+  const win = [];
+  for (let k = 6; k >= 1; k--) { const i = baseIdx - k; win.push({ y: Math.floor(i / 12), m: (i % 12) + 1 }); }
+  const val6 = (e) => win.reduce((s, p) =>
+    s + (((p.y === 2026 ? e.m26 : p.y === 2025 ? e.m25 : null) || [])[p.m - 1] || 0), 0);
+  const escopo = new Set(linhas().map((p) => p.cliente));
+
+  // cesta por cliente e compradores por produto
+  const cesta = {}, prodInfo = {};
+  for (const p of MIX.cube.prods) {
+    if (!escopo.has(p.cliente)) continue;
+    const v = val6(p);
+    if (v <= 0) continue;
+    const c = (cesta[p.cliente] ??= { itens: new Set(), cats: new Set(), fat: 0 });
+    c.itens.add(p.prod); c.cats.add(p.cat); c.fat += v;
+    const pi = (prodInfo[p.prod] ??= { cli: new Set(), fat: 0, cat: p.cat, vals: [] });
+    pi.cli.add(p.cliente); pi.fat += v; pi.vals.push(v);
+  }
+  const clientes = Object.entries(cesta);
+  const n = clientes.length || 1;
+  const mediaItens = clientes.reduce((s, [, c]) => s + c.itens.size, 0) / n;
+  const mediaCats = clientes.reduce((s, [, c]) => s + c.cats.size, 0) / n;
+  const mono = clientes.filter(([, c]) => c.itens.size <= 2).length;
+  const prods = Object.entries(prodInfo).sort((a, b) => b[1].cli.size - a[1].cli.size);
+  const maisPen = prods[0];
+
+  $("basket-kpis").innerHTML =
+    kpiCard(IC.vol, "", "Itens por cliente<br>(média)", fmtBR(mediaItens, 1),
+      `${fmtBR(clientes.length)} clientes com compra na janela`) +
+    kpiCard(IC.fat, "", "Categorias<br>por cliente", fmtBR(mediaCats, 1), "amplitude média da cesta") +
+    kpiCard(IC.dev, "", "Cesta mínima<br>(1–2 itens)", fmtBR(mono),
+      `<b style="color:var(--bad)">${fmtPct(mono / n)}</b> da base — risco e oportunidade`) +
+    kpiCard(IC.pos, "", "Produto mais<br>presente", maisPen ? fmtPct(maisPen[1].cli.size / n) : "—",
+      maisPen ? esc(maisPen[0]) : "");
+
+  // histograma de profundidade
+  const buckets = [["1–2", 0], ["3–5", 0], ["6–10", 0], ["11–20", 0], ["21+", 0]];
+  for (const [, c] of clientes) {
+    const k = c.itens.size;
+    buckets[k <= 2 ? 0 : k <= 5 ? 1 : k <= 10 ? 2 : k <= 20 ? 3 : 4][1]++;
+  }
+  const maxB = Math.max(1, ...buckets.map((b) => b[1]));
+  $("basket-hist").innerHTML = buckets.map(([rot, q]) =>
+    `<div style="display:flex;align-items:center;gap:10px;margin:8px 0;font-size:11.5px">
+       <span style="width:46px;color:var(--mut);font-weight:700">${rot}</span>
+       <div class="bar" style="flex:1"><i style="width:${Math.round(q / maxB * 100)}%"></i></div>
+       <span style="width:92px;text-align:right"><b>${fmtBR(q)}</b> <span style="color:var(--soft)">(${fmtBR(q / n * 100, 0)}%)</span></span>
+     </div>`).join("");
+
+  // penetração (produtos mais presentes)
+  $("basket-pen").innerHTML = `<table class="fat-tab"><thead><tr>
+      <th>PRODUTO</th><th class="r">Clientes</th><th class="r">% da base</th><th class="r">Venda 6 m</th></tr></thead><tbody>` +
+    prods.slice(0, 12).map(([nome, pi]) =>
+      `<tr><td><b>${esc(nome)}</b></td><td class="r">${fmtBR(pi.cli.size)}</td>
+       <td class="r">${fmtBR(pi.cli.size / n * 100, 0)}%</td><td class="r">${fmtV(pi.fat)}</td></tr>`).join("") +
+    "</tbody></table>";
+
+  // associações: pares A→B entre os 40 maiores produtos
+  const topP = Object.entries(prodInfo).sort((a, b) => b[1].fat - a[1].fat).slice(0, 40);
+  const giroMed = (pi) => { const o = [...pi.vals].sort((x, y) => x - y); return o.length ? o[Math.floor(o.length / 2)] : 0; };
+  const pares = [];
+  for (const [a, pa] of topP) for (const [b, pb] of topP) {
+    if (a === b || pa.cli.size < 8) continue;
+    let inter = 0;
+    for (const c of pa.cli) if (pb.cli.has(c)) inter++;
+    const conf = inter / pa.cli.size;
+    const semB = pa.cli.size - inter;
+    if (conf < 0.35 || !semB) continue;
+    const lift = conf / (pb.cli.size / n);
+    if (lift < 1.05) continue;
+    const alvo = [...pa.cli].filter((c) => !pb.cli.has(c))
+      .sort((x, y) => cesta[y].fat - cesta[x].fat).slice(0, 4);
+    pares.push({ a, b, na: pa.cli.size, inter, conf, lift, semB, pot: giroMed(pb) * semB, alvo });
+  }
+  pares.sort((x, y) => y.pot - x.pot);
+  $("basket-assoc").innerHTML = `<table class="fat-tab"><thead><tr>
+      <th class="r">#</th><th>QUEM COMPRA…</th><th>…TAMBÉM COMPRA</th>
+      <th class="r">Compram A</th><th class="r">Os 2</th><th class="r">Confiança</th>
+      <th class="r">Lift</th><th class="r">A sem B</th><th class="r">Potencial</th><th>Clientes-alvo</th></tr></thead><tbody>` +
+    (pares.slice(0, 15).map((p, i) =>
+      `<tr><td class="r"><b>${i + 1}</b></td><td><b>${esc(p.a)}</b></td><td><b>${esc(p.b)}</b></td>
+       <td class="r">${fmtBR(p.na)}</td><td class="r">${fmtBR(p.inter)}</td>
+       <td class="r"><span class="farolp ${p.conf >= 0.6 ? "cor-ok" : "cor-med"}">${fmtBR(p.conf * 100, 0)}%</span></td>
+       <td class="r">${fmtBR(p.lift, 1)}×</td><td class="r">${fmtBR(p.semB)}</td>
+       <td class="r"><b style="color:var(--ok)">${fmtV(p.pot)}</b></td>
+       <td style="font-size:10.5px;color:var(--mut)">${p.alvo.map(esc).join(" · ")}</td></tr>`).join("") ||
+     '<tr><td colspan="10" class="empty">Sem associações relevantes no recorte.</td></tr>') +
+    `</tbody></table>
+     <div class="note">📖 <b>Como ler:</b> Confiança = % dos compradores de A que também compram B ·
+       Lift = quanto comprar A aumenta a chance de comprar B (1× = nenhuma relação) ·
+       Potencial = giro mediano de B × compradores de A que ainda não compram B (os clientes-alvo).</div>`;
+
+  // clientes com cesta rasa
+  const rasas = clientes.filter(([, c]) => c.itens.size < mediaItens)
+    .sort((x, y) => y[1].fat - x[1].fat).slice(0, 12);
+  const sugest = (c) => prods.filter(([nome]) => !c.itens.has(nome)).slice(0, 3).map(([nome]) => nome);
+  $("basket-rasa").innerHTML = `<table class="fat-tab"><thead><tr>
+      <th class="r">#</th><th>CLIENTE</th><th class="r">Venda 6 m</th><th class="r">Itens</th>
+      <th class="r">Categorias</th><th>Sugestão de entrada (mais penetrados que faltam)</th></tr></thead><tbody>` +
+    rasas.map(([nome, c], i) =>
+      `<tr><td class="r"><b>${i + 1}</b></td><td><b>${esc(nome)}</b></td>
+       <td class="r"><b>${fmtV(c.fat)}</b></td><td class="r">${fmtBR(c.itens.size)}</td>
+       <td class="r">${fmtBR(c.cats.size)}</td>
+       <td style="font-size:10.5px;color:var(--mut)">${sugest(c).map(esc).join(" · ")}</td></tr>`).join("") +
+    "</tbody></table>";
+}
+
 function renderVol() {
   $("vol-conteudo").innerHTML = emConstrucao("Volume / Mix — visão “batalha naval”",
     "Matriz do macro ao micro: <b>itens nas linhas</b> (agrupados por categoria e ordenados pelo volume total da empresa, " +
