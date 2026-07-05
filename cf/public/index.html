@@ -52,7 +52,7 @@
         <div class="navgrp-body">
           <div class="nav-i act" data-v="geral"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</div>
           <div class="nav-i" data-v="fat"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 17l5-5 4 4 8-8"/><path d="M14 8h6v6"/></svg>Faturamento</div>
-          <div class="nav-i" data-v="vol"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>Volume / Mix</div>
+          <div class="nav-i" data-v="vol"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>Mix por Cliente</div>
           <div class="nav-i" data-v="basket"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 10h16l-2 10H6zM8 10l3-6M16 10l-3-6"/></svg>Análise Basket</div>
           <div class="nav-i" data-v="metas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>Metas vs Realizado</div>
           <div class="nav-i" data-v="posit"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5.5"/></svg>Positivados</div>
@@ -303,16 +303,27 @@
       </div>
     </section>
 
-    <!-- ========== VOLUME / MIX (batalha naval) ========== -->
+    <!-- ========== MIX POR CLIENTE (batalha naval) ========== -->
     <section class="view" id="v-vol">
-      <h2 class="pg">Volume / Mix por item</h2>
-      <div class="sub">Batalha naval: itens (linhas, por categoria e curva ABC) × clientes (colunas) — clique na categoria
+      <h2 class="pg">Mix por Cliente</h2>
+      <div class="sub">Itens (linhas, por categoria e curva de vendas) × clientes (colunas) — clique na categoria
         para abrir os produtos. A cor da célula mostra a intensidade; passe o mouse para ver caixas, valor e
         representatividade. Segue o período e todos os filtros.</div>
       <div class="card">
         <div class="tctl">
           <span class="fchip on" data-vm="cx" id="vol-cx">Caixas</span>
           <span class="fchip" data-vm="val" id="vol-val">Valor</span>
+          <div class="f-per" style="position:relative">
+            <button type="button" id="vol-linha-btn" class="perbtn" style="min-width:160px;height:28px"></button>
+            <div id="vol-linha-panel" class="perpanel" style="width:280px">
+              <div class="perquick">
+                <button type="button" id="vl-todas">Todas</button>
+                <button type="button" id="vl-limpar">Limpar</button>
+              </div>
+              <div class="permeses" id="vol-linha-lista" style="max-height:300px"></div>
+            </div>
+          </div>
+          <div id="vol-grupos" style="display:flex;gap:5px;flex-wrap:wrap"></div>
           <span style="margin-left:auto;color:var(--soft);font-size:11.5px" id="vol-info"></span>
         </div>
         <div id="vol-conteudo"><div class="empty">Carregando…</div></div>

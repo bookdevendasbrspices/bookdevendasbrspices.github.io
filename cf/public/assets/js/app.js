@@ -1178,7 +1178,7 @@ function dashRegioes(meses, porRegiao) {
 
 /* ---------------- exportação PDF / Excel ---------------- */
 const viewAtiva = () => document.querySelector(".view.on").id.slice(2);
-const NOMES_VIEW = { geral: "Dashboard", fat: "Faturamento", vol: "Volume / Mix",
+const NOMES_VIEW = { geral: "Dashboard", fat: "Faturamento", vol: "Mix por Cliente",
                      basket: "Análise Basket", curva: "RKG Itens",
                      metas: "Metas vs Realizado", posit: "Positivados" };
 
@@ -1959,13 +1959,15 @@ function renderCurvaOficial() {
   if (!reg || !reg.itens) { $("curva-oficial-info").textContent = ""; return; }
   $("curva-oficial-info").textContent =
     `VIGENTE — atualizada em ${new Date(reg.ts).toLocaleString("pt-BR")} · ${reg.itens.length} itens`;
+  const temGrupo = reg.itens.some((o) => o.grupo);
   $("curva-oficial-tab").innerHTML =
     `<table class="fat-tab"><thead><tr><th class="r">RKG LINHA</th><th>ITEM</th><th class="r">ID</th>
-      <th class="r">CURVA DE VENDAS</th><th>MIX PRIORITÁRIO</th></tr></thead><tbody>` +
+      <th class="r">CURVA DE VENDAS</th>${temGrupo ? "<th>GRUPO DE REVISÃO</th>" : ""}<th>MIX PRIORITÁRIO</th></tr></thead><tbody>` +
     [...reg.itens].sort((a, b) => (a.rkg ?? 9e9) - (b.rkg ?? 9e9)).map((o) =>
       `<tr><td class="r"><b>${o.rkg ?? "—"}</b></td><td><b>${esc(o.item)}</b></td>
        <td class="r">${esc(o.id || "")}</td>
        <td class="r">${o.curva ? seloCurva(o.curva) : "—"}</td>
+       ${temGrupo ? `<td style="font-size:10px;color:var(--mut)">${esc(o.grupo || "—")}</td>` : ""}
        <td style="font-size:10px;font-weight:700;color:${CORES_ACAO[o.acao] || "var(--mut)"}">${esc(o.acao || "—")}</td></tr>`).join("") +
     "</tbody></table>";
 }
@@ -1995,6 +1997,7 @@ async function processarUploadCurva(file) {
           else if ((v.includes("RKG") || v.includes("RANKING")) && v.includes("LINHA")) m.rkg = i;      // prioridade
           else if (m.rkgGeral == null && (v.includes("RKG") || v.includes("RANKING"))) m.rkgGeral = i;  // reserva
           else if (m.curva == null && v.startsWith("CURVA")) m.curva = i;
+          else if (m.grupo == null && v.includes("GRUPO")) m.grupo = i;   // GRUPO DE REVISÃO
           else if (m.acao == null && (v.includes("MIX") || v.includes("PRIORIT"))) m.acao = i;
         });
         if (m.rkg == null) m.rkg = m.rkgGeral;   // sem coluna "por linha", usa o RKG que houver
@@ -2015,6 +2018,7 @@ async function processarUploadCurva(file) {
       itens.push({ item, id: cel(m.id),
         rkg: parseInt(cel(m.rkg).replace(/[^\d]/g, ""), 10) || null,
         curva: curvaNorm(cel(m.curva)),
+        grupo: cel(m.grupo).toUpperCase(),
         acao: cel(m.acao).toUpperCase() });
     });
     if (!itens.length) throw new Error("nenhuma linha de item encontrada abaixo do cabeçalho");
@@ -2125,8 +2129,38 @@ function renderCurva() {
   renderCurvaOficial();
 }
 
-/* ---------------- Volume/Mix: batalha naval itens × clientes ---------------- */
-const VOL = { abertos: {}, metrica: "cx", nCli: 18 };
+/* ---------------- Mix por Cliente: batalha naval itens × clientes ---------------- */
+const VOL = { abertos: {}, metrica: "cx", nCli: 18, linhas: null, grupo: "" };
+
+/* item → grupo de revisão (coluna GRUPO do MIX PADRÃO subido na base oficial) */
+function grupoLookup() {
+  const reg = CURVA.oficial;
+  if (!reg || !reg.itens) return null;
+  if (VOL._gSrc !== reg) {
+    const m = {};
+    for (const o of reg.itens) if (o.grupo) m[String(o.item || "").toUpperCase()] = o.grupo;
+    VOL._gMap = m; VOL._gSrc = reg;
+  }
+  return Object.keys(VOL._gMap).length ? VOL._gMap : null;
+}
+/* janela de categorias (nomes por família, sem o número) */
+function montarLinhasVol(cats) {
+  const el = $("vol-linha-lista");
+  if (el.dataset.pronto !== cats.join("|")) {
+    el.dataset.pronto = cats.join("|");
+    el.innerHTML = cats.map((c) =>
+      `<label class="permes" style="text-transform:none"><input type="checkbox" data-cat="${esc(c)}"><span>${esc(rotuloCat(c))}</span></label>`).join("");
+    el.querySelectorAll("input").forEach((cb) => cb.addEventListener("change", () => {
+      const sel = [...el.querySelectorAll("input:checked")].map((x) => x.dataset.cat);
+      VOL.linhas = sel.length === cats.length ? null : sel;
+      renderVol();
+    }));
+  }
+  el.querySelectorAll("input").forEach((cb) =>
+    cb.checked = !VOL.linhas || VOL.linhas.includes(cb.dataset.cat));
+  const total = cats.length, n = !VOL.linhas ? total : VOL.linhas.length;
+  $("vol-linha-btn").textContent = n === total ? "Todas as categorias" : `${n} de ${total} categorias`;
+}
 
 function renderVol() {
   if (!MIX.cube) {
@@ -2134,9 +2168,24 @@ function renderVol() {
     carregarMix();
     return;
   }
+  carregarCurvaOficial();   // p/ o grupo de revisão (só carrega no perfil autorizado)
+  montarLinhasVol([...new Set(MIX.cube.prods.map((p) => p.cat))].sort());
+  // chips de GRUPO DE REVISÃO (aparecem quando a base oficial subida tiver a coluna)
+  const gl = grupoLookup();
+  const gEl = $("vol-grupos");
+  const grupos = gl ? [...new Set(Object.values(gl))].sort() : [];
+  gEl.innerHTML = grupos.map((g) =>
+    `<span class="fchip${VOL.grupo === g ? " on" : ""}" data-g="${esc(g)}" style="padding:3px 8px;font-size:9.5px">${esc(g)}</span>`).join("");
+  gEl.querySelectorAll(".fchip").forEach((b) => b.addEventListener("click", () => {
+    VOL.grupo = VOL.grupo === b.dataset.g ? "" : b.dataset.g;
+    renderVol();
+  }));
+
   const meses = mesesSel();
   const escopo = new Set(linhas().map((p) => p.cliente));
   let r = MIX.cube.prods.filter((p) => escopo.has(p.cliente));
+  if (VOL.linhas) r = r.filter((p) => VOL.linhas.includes(p.cat));
+  if (VOL.grupo && gl) r = r.filter((p) => gl[String(p.prod).toUpperCase()] === VOL.grupo);
   if (S.fCat) r = r.filter((p) => p.cat === S.fCat);
   if (S.fProd) r = r.filter((p) => p.prod === S.fProd);
   const cxP = (e) => somaMeses(e.q26, meses);
@@ -2246,6 +2295,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("click", () => $("curva-linha-panel").classList.remove("on"));
     $("cl-todas").addEventListener("click", () => { CURVA.linhas = null; renderCurva(); });
     $("cl-limpar").addEventListener("click", () => { CURVA.linhas = []; renderCurva(); });
+  }
+  if ($("vol-linha-btn")) {
+    $("vol-linha-btn").addEventListener("click", (e) => { e.stopPropagation(); $("vol-linha-panel").classList.toggle("on"); });
+    $("vol-linha-panel").addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => $("vol-linha-panel").classList.remove("on"));
+    $("vl-todas").addEventListener("click", () => { VOL.linhas = null; renderVol(); });
+    $("vl-limpar").addEventListener("click", () => { VOL.linhas = []; renderVol(); });
   }
   if ($("curva-upload")) $("curva-upload").addEventListener("change", (e) => {
     const f = e.target.files[0];
